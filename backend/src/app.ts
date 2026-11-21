@@ -4,6 +4,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import healthRoutes from './routes/health.routes.js';
 import authRoutes from './modules/auth/auth.routes.js';
+import usersRoutes from './modules/users/users.routes.js';
 import { sendError } from './utils/api-response.js';
 
 const app: Application = express();
@@ -27,6 +28,7 @@ app.use(cookieParser());
 // API routes
 app.use('/api', healthRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/users', usersRoutes);
 
 // 404 Route Not Found handler
 app.use((_req: Request, res: Response) => {

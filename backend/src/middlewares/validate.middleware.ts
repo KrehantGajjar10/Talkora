@@ -18,3 +18,20 @@ export const validateBody = (schema: ZodSchema) => {
     next();
   };
 };
+
+export const validateQuery = (schema: ZodSchema) => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const result = schema.safeParse(req.query);
+    if (!result.success) {
+      const zodError = result.error as ZodError;
+      const formattedErrors = zodError.issues.map((issue) => ({
+        field: issue.path.join('.'),
+        message: issue.message,
+      }));
+      sendError(res, 422, 'Validation failed', formattedErrors);
+      return;
+    }
+    res.locals.validatedQuery = result.data;
+    next();
+  };
+};

@@ -1,7 +1,10 @@
-import express, { Application } from 'express';
+import express, { Application, Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import healthRoutes from './routes/health.routes.js';
+import authRoutes from './modules/auth/auth.routes.js';
+import { sendError } from './utils/api-response.js';
 
 const app: Application = express();
 
@@ -17,10 +20,23 @@ app.use(
   })
 );
 
-// Body parsing middleware
+// Body and Cookie parsing middleware
 app.use(express.json());
+app.use(cookieParser());
 
 // API routes
 app.use('/api', healthRoutes);
+app.use('/api/auth', authRoutes);
+
+// 404 Route Not Found handler
+app.use((_req: Request, res: Response) => {
+  sendError(res, 404, 'Route not found', []);
+});
+
+// Centralized error handler
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('Unhandled server error:', err instanceof Error ? err.message : err);
+  sendError(res, 500, 'Internal server error', []);
+});
 
 export default app;

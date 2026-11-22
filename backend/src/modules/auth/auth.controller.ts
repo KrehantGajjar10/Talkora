@@ -93,7 +93,8 @@ export async function refresh(req: Request, res: Response): Promise<void> {
 export async function logout(req: Request, res: Response): Promise<void> {
   try {
     const rawRefreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
-    await authService.logout(rawRefreshToken, req.sessionId);
+    const rawAccessToken = req.cookies?.[ACCESS_COOKIE_NAME];
+    await authService.logout(rawRefreshToken, rawAccessToken);
 
     res.clearCookie(ACCESS_COOKIE_NAME, getClearAccessCookieOptions());
     res.clearCookie(REFRESH_COOKIE_NAME, getClearRefreshCookieOptions());

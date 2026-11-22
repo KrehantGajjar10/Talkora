@@ -4,6 +4,7 @@ import {
   generateRefreshToken,
   hashRefreshToken,
   signAccessToken,
+  verifyAccessToken,
   REFRESH_TOKEN_MAX_AGE_MS,
 } from "../../config/auth.js";
 import type { RegisterInput, LoginInput } from "./auth.validation.js";
@@ -209,30 +210,50 @@ export async function refresh(
 }
 
 export async function logout(
-  refreshToken?: string,
-  sessionId?: string,
+  rawRefreshToken?: string,
+  rawAccessToken?: string,
 ): Promise<void> {
-  if (refreshToken) {
-    const tokenHash = hashRefreshToken(refreshToken);
-    await prisma.session.updateMany({
-      where: {
-        tokenHash,
-        revokedAt: null,
-      },
-      data: {
-        revokedAt: new Date(),
-      },
-    });
-  } else if (sessionId) {
-    await prisma.session.updateMany({
-      where: {
-        id: sessionId,
-        revokedAt: null,
-      },
-      data: {
-        revokedAt: new Date(),
-      },
-    });
+  let sessionRevoked = false;
+
+  // 1. If refresh token is present, attempt to revoke its session
+  if (rawRefreshToken && typeof rawRefreshToken === "string") {
+    try {
+      const tokenHash = hashRefreshToken(rawRefreshToken);
+      const updateResult = await prisma.session.updateMany({
+        where: {
+          tokenHash,
+          revokedAt: null,
+        },
+        data: {
+          revokedAt: new Date(),
+        },
+      });
+      if (updateResult.count > 0) {
+        sessionRevoked = true;
+      }
+    } catch {
+      // Continue to access token fallback
+    }
+  }
+
+  // 2. Stale/Invalid refresh cookie fallback: inspect access token
+  if (!sessionRevoked && rawAccessToken && typeof rawAccessToken === "string") {
+    try {
+      const payload = await verifyAccessToken(rawAccessToken);
+      if (payload && payload.sid) {
+        await prisma.session.updateMany({
+          where: {
+            id: payload.sid,
+            revokedAt: null,
+          },
+          data: {
+            revokedAt: new Date(),
+          },
+        });
+      }
+    } catch {
+      // Access token was also expired or invalid; logout remains idempotent
+    }
   }
 }
 

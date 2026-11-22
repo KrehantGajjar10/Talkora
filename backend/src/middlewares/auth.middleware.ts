@@ -8,21 +8,22 @@ export const authenticate = async (
   res: Response,
   next: NextFunction
 ): Promise<void> => {
+  const token = req.cookies?.[ACCESS_COOKIE_NAME];
+  if (!token || typeof token !== 'string') {
+    sendError(res, 401, 'Authentication required', []);
+    return;
+  }
+
+  let payload: { sub: string; sid: string };
   try {
-    const token = req.cookies?.[ACCESS_COOKIE_NAME];
-    if (!token || typeof token !== 'string') {
-      sendError(res, 401, 'Authentication required', []);
-      return;
-    }
+    payload = await verifyAccessToken(token);
+  } catch {
+    // Missing, invalid, or expired JWT payload
+    sendError(res, 401, 'Authentication required', []);
+    return;
+  }
 
-    let payload: { sub: string; sid: string };
-    try {
-      payload = await verifyAccessToken(token);
-    } catch {
-      sendError(res, 401, 'Authentication required', []);
-      return;
-    }
-
+  try {
     const session = await prisma.session.findUnique({
       where: { id: payload.sid },
       include: {
@@ -42,6 +43,7 @@ export const authenticate = async (
       session.revokedAt !== null ||
       session.expiresAt <= new Date()
     ) {
+      // Session not found, revoked, or expired
       sendError(res, 401, 'Authentication required', []);
       return;
     }
@@ -50,8 +52,10 @@ export const authenticate = async (
     req.sessionId = session.id;
 
     next();
-  } catch {
-    sendError(res, 401, 'Authentication required', []);
+  } catch (err) {
+    // Database or infrastructure failure must reach centralized error handling (500)
+    // Never silently mask a database outage as a 401 Unauthorized response!
+    next(err);
   }
 };
 
@@ -60,19 +64,21 @@ export const optionalAuthenticate = async (
   _res: Response,
   next: NextFunction
 ): Promise<void> => {
+  const token = req.cookies?.[ACCESS_COOKIE_NAME];
+  if (!token || typeof token !== 'string') {
+    // Guest without credentials
+    return next();
+  }
+
+  let payload: { sub: string; sid: string };
   try {
-    const token = req.cookies?.[ACCESS_COOKIE_NAME];
-    if (!token || typeof token !== 'string') {
-      return next();
-    }
+    payload = await verifyAccessToken(token);
+  } catch {
+    // Invalid or expired token: treat as guest according to policy
+    return next();
+  }
 
-    let payload: { sub: string; sid: string };
-    try {
-      payload = await verifyAccessToken(token);
-    } catch {
-      return next();
-    }
-
+  try {
     const session = await prisma.session.findUnique({
       where: { id: payload.sid },
       include: {
@@ -92,6 +98,7 @@ export const optionalAuthenticate = async (
       session.revokedAt !== null ||
       session.expiresAt <= new Date()
     ) {
+      // Session revoked or expired: treat as guest
       return next();
     }
 
@@ -99,7 +106,8 @@ export const optionalAuthenticate = async (
     req.sessionId = session.id;
 
     next();
-  } catch {
-    next();
+  } catch (err) {
+    // Database or infrastructure failure must NOT be silently swallowed
+    next(err);
   }
 };

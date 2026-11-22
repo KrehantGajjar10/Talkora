@@ -3,6 +3,8 @@ import { Request, Response, NextFunction } from 'express';
 import { sendError } from '../utils/api-response.js';
 
 export class UnsupportedMediaError extends Error {
+  public readonly statusCode = 415;
+
   constructor(
     message: string = 'Invalid or unsupported image format. Allowed formats: JPEG, PNG, WebP'
   ) {

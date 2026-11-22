@@ -1,6 +1,5 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import * as postsService from './posts.service.js';
-import { PostsError } from './posts.service.js';
 import { sendSuccess, sendError } from '../../utils/api-response.js';
 import { removeImageSchema, FeedSortOption } from './posts.validation.js';
 
@@ -9,7 +8,11 @@ function getParam(param: string | string[] | undefined): string | null {
   return Array.isArray(param) ? param[0] : param;
 }
 
-export async function createPost(req: Request, res: Response): Promise<void> {
+export async function createPost(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     if (!req.user) {
       sendError(res, 401, 'Authentication required', []);
@@ -24,17 +27,14 @@ export async function createPost(req: Request, res: Response): Promise<void> {
 
     sendSuccess(res, 201, 'Post created successfully', { post });
   } catch (error) {
-    if (error instanceof PostsError) {
-      sendError(res, error.statusCode, error.message, []);
-      return;
-    }
-    sendError(res, 500, 'Failed to create post', []);
+    next(error);
   }
 }
 
 export async function getPublicFeed(
   req: Request,
-  res: Response
+  res: Response,
+  next: NextFunction
 ): Promise<void> {
   try {
     const query = (res.locals.validatedQuery || req.query) as {
@@ -54,15 +54,15 @@ export async function getPublicFeed(
     );
     sendSuccess(res, 200, 'Feed retrieved successfully', result);
   } catch (error) {
-    if (error instanceof PostsError) {
-      sendError(res, error.statusCode, error.message, []);
-      return;
-    }
-    sendError(res, 500, 'Failed to retrieve feed', []);
+    next(error);
   }
 }
 
-export async function getPostById(req: Request, res: Response): Promise<void> {
+export async function getPostById(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     const postId = getParam(req.params.postId);
     if (!postId) {
@@ -73,15 +73,15 @@ export async function getPostById(req: Request, res: Response): Promise<void> {
     const post = await postsService.getPostById(postId, req.user?.id);
     sendSuccess(res, 200, 'Post retrieved successfully', { post });
   } catch (error) {
-    if (error instanceof PostsError) {
-      sendError(res, error.statusCode, error.message, []);
-      return;
-    }
-    sendError(res, 500, 'Failed to retrieve post', []);
+    next(error);
   }
 }
 
-export async function editPostText(req: Request, res: Response): Promise<void> {
+export async function editPostText(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     if (!req.user) {
       sendError(res, 401, 'Authentication required', []);
@@ -102,17 +102,14 @@ export async function editPostText(req: Request, res: Response): Promise<void> {
 
     sendSuccess(res, 200, 'Post updated successfully', { post });
   } catch (error) {
-    if (error instanceof PostsError) {
-      sendError(res, error.statusCode, error.message, []);
-      return;
-    }
-    sendError(res, 500, 'Failed to update post', []);
+    next(error);
   }
 }
 
 export async function modifyPostImage(
   req: Request,
-  res: Response
+  res: Response,
+  next: NextFunction
 ): Promise<void> {
   try {
     if (!req.user) {
@@ -161,15 +158,15 @@ export async function modifyPostImage(
       []
     );
   } catch (error) {
-    if (error instanceof PostsError) {
-      sendError(res, error.statusCode, error.message, []);
-      return;
-    }
-    sendError(res, 500, 'Failed to modify post image', []);
+    next(error);
   }
 }
 
-export async function deletePost(req: Request, res: Response): Promise<void> {
+export async function deletePost(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     if (!req.user) {
       sendError(res, 401, 'Authentication required', []);
@@ -185,10 +182,6 @@ export async function deletePost(req: Request, res: Response): Promise<void> {
     await postsService.deletePost(postId, req.user.id);
     res.status(204).send();
   } catch (error) {
-    if (error instanceof PostsError) {
-      sendError(res, error.statusCode, error.message, []);
-      return;
-    }
-    sendError(res, 500, 'Failed to delete post', []);
+    next(error);
   }
 }

@@ -9,24 +9,24 @@ import { voteSchema } from './votes.validation.js';
 
 const router = Router();
 
-// POST /posts/:postId/vote (Authenticated)
+// POST /posts/:postId/vote (and /votes for API client flexibility) (Authenticated)
 router.post(
-  '/posts/:postId/vote',
+  ['/posts/:postId/vote', '/posts/:postId/votes'],
   authenticate,
   validateBody(voteSchema),
   votesController.castVote
 );
 
-// GET /posts/:postId/vote (Public, with optional auth for userVote)
+// GET /posts/:postId/vote (and /votes) (Public, with optional auth for userVote)
 router.get(
-  '/posts/:postId/vote',
+  ['/posts/:postId/vote', '/posts/:postId/votes'],
   optionalAuthenticate,
   votesController.getVote
 );
 
-// DELETE /posts/:postId/vote (Authenticated)
+// DELETE /posts/:postId/vote (and /votes) (Authenticated)
 router.delete(
-  '/posts/:postId/vote',
+  ['/posts/:postId/vote', '/posts/:postId/votes'],
   authenticate,
   votesController.removeVote
 );

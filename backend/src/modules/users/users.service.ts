@@ -1,13 +1,14 @@
 import { prisma } from '../../config/prisma.js';
 import { Prisma } from '../../generated/prisma/client.js';
+import { AppError } from '../../utils/errors.js';
 import type { UpdateProfileInput } from './users.validation.js';
 
-export class UsersError extends Error {
+export class UsersError extends AppError {
   constructor(
-    public statusCode: number,
+    statusCode: number,
     message: string
   ) {
-    super(message);
+    super(statusCode, message);
     this.name = 'UsersError';
   }
 }

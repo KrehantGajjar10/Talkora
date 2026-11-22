@@ -39,3 +39,31 @@ export const updateProfileSchema = z
   );
 
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+
+export const userPostsQuerySchema = z.object({
+  page: z
+    .string()
+    .optional()
+    .default('1')
+    .transform((val) => Number(val))
+    .pipe(
+      z
+        .number()
+        .int('Page must be an integer')
+        .min(1, 'Page must be at least 1')
+    ),
+  limit: z
+    .string()
+    .optional()
+    .default('10')
+    .transform((val) => Number(val))
+    .pipe(
+      z
+        .number()
+        .int('Limit must be an integer')
+        .min(1, 'Limit must be at least 1')
+        .max(50, 'Limit cannot exceed 50')
+    ),
+});
+
+export type UserPostsQuery = z.infer<typeof userPostsQuerySchema>;

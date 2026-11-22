@@ -1,5 +1,6 @@
 import { prisma } from '../../config/prisma.js';
 import { Prisma } from '../../generated/prisma/client.js';
+import { AppError } from '../../utils/errors.js';
 import { uploadImageStream, deleteImage } from '../../config/cloudinary.js';
 import type {
   CreatePostInput,
@@ -7,12 +8,12 @@ import type {
   FeedSortOption,
 } from './posts.validation.js';
 
-export class PostsError extends Error {
+export class PostsError extends AppError {
   constructor(
-    public statusCode: number,
+    statusCode: number,
     message: string
   ) {
-    super(message);
+    super(statusCode, message);
     this.name = 'PostsError';
   }
 }
@@ -492,4 +493,112 @@ export async function deletePost(
   if (existing.imagePublicId) {
     void deleteImage(existing.imagePublicId);
   }
+}
+
+export async function getUserPosts(
+  username: string,
+  page: number = 1,
+  limit: number = 10,
+  currentUserId?: string
+): Promise<PaginatedPosts> {
+  const normalizedUsername = username.trim().toLowerCase();
+
+  const user = await prisma.user.findUnique({
+    where: { username: normalizedUsername },
+    select: { id: true },
+  });
+
+  if (!user) {
+    throw new PostsError(404, 'User not found');
+  }
+
+  const skip = (page - 1) * limit;
+  const take = limit;
+
+  const userVoteSql = currentUserId
+    ? Prisma.sql`(SELECT v2.type::text FROM votes v2 WHERE v2.post_id = p.id AND v2.user_id = ${currentUserId}) AS "userVote"`
+    : Prisma.sql`NULL::text AS "userVote"`;
+
+  const [rawPosts, totalPosts] = await Promise.all([
+    prisma.$queryRaw<
+      Array<{
+        id: string;
+        title: string;
+        content: string | null;
+        imageUrl: string | null;
+        createdAt: Date;
+        updatedAt: Date;
+        authorId: string;
+        authorUsername: string;
+        authorDisplayName: string;
+        authorAvatarUrl: string | null;
+        commentCount: number;
+        upvotes: number;
+        downvotes: number;
+        score: number;
+        userVote: string | null;
+      }>
+    >`
+      SELECT
+        p.id,
+        p.title,
+        p.content,
+        p.image_url AS "imageUrl",
+        p.created_at AS "createdAt",
+        p.updated_at AS "updatedAt",
+        u.id AS "authorId",
+        u.username AS "authorUsername",
+        u.display_name AS "authorDisplayName",
+        u.avatar_url AS "authorAvatarUrl",
+        (SELECT COUNT(*)::int FROM comments c WHERE c.post_id = p.id) AS "commentCount",
+        COUNT(v.id) FILTER (WHERE v.type = 'UPVOTE')::int AS "upvotes",
+        COUNT(v.id) FILTER (WHERE v.type = 'DOWNVOTE')::int AS "downvotes",
+        (COUNT(v.id) FILTER (WHERE v.type = 'UPVOTE') - COUNT(v.id) FILTER (WHERE v.type = 'DOWNVOTE'))::int AS "score",
+        ${userVoteSql}
+      FROM posts p
+      JOIN users u ON p.author_id = u.id
+      LEFT JOIN votes v ON p.id = v.post_id
+      WHERE u.id = ${user.id}
+      GROUP BY p.id, u.id
+      ORDER BY p.created_at DESC, p.id DESC
+      LIMIT ${take} OFFSET ${skip}
+    `,
+    prisma.post.count({ where: { authorId: user.id } }),
+  ]);
+
+  const formattedPosts: SafePost[] = rawPosts.map((row) => ({
+    id: row.id,
+    title: row.title,
+    content: row.content,
+    imageUrl: row.imageUrl,
+    author: {
+      id: row.authorId,
+      username: row.authorUsername,
+      displayName: row.authorDisplayName,
+      avatarUrl: row.authorAvatarUrl,
+    },
+    commentCount: Number(row.commentCount),
+    upvotes: Number(row.upvotes),
+    downvotes: Number(row.downvotes),
+    score: Number(row.score),
+    userVote: (row.userVote as 'UPVOTE' | 'DOWNVOTE') || null,
+    createdAt: new Date(row.createdAt),
+    updatedAt: new Date(row.updatedAt),
+  }));
+
+  const totalPages = Math.ceil(totalPosts / limit) || 1;
+  const hasNextPage = page < totalPages;
+  const hasPreviousPage = page > 1;
+
+  return {
+    posts: formattedPosts,
+    pagination: {
+      page,
+      limit,
+      totalPosts,
+      totalPages,
+      hasNextPage,
+      hasPreviousPage,
+    },
+  };
 }

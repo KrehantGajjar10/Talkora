@@ -160,10 +160,11 @@ export const openApiSpec = {
       UpdateProfileInput: {
         type: 'object',
         properties: {
+          username: { type: 'string', minLength: 3, maxLength: 30, example: 'alex_updated' },
           displayName: { type: 'string', minLength: 1, maxLength: 50, example: 'Updated Name' },
           bio: { type: 'string', maxLength: 500, nullable: true, example: 'My updated bio' },
-          avatarUrl: { type: 'string', format: 'uri', nullable: true, example: 'https://example.com/avatar.png' },
         },
+        additionalProperties: false,
       },
       CreatePostInput: {
         type: 'object',
@@ -215,6 +216,45 @@ export const openApiSpec = {
                     uptime: { type: 'number', example: 124.5 },
                   },
                 },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/health/ready': {
+      get: {
+        summary: 'Service Readiness Check',
+        description: 'Returns readiness status of the backend by executing an active query against PostgreSQL.',
+        tags: ['Health'],
+        responses: {
+          200: {
+            description: 'Backend service and database are ready.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    message: { type: 'string', example: 'Talkora API is ready' },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        status: { type: 'string', example: 'ready' },
+                        database: { type: 'string', example: 'connected' },
+                        timestamp: { type: 'string', format: 'date-time' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          503: {
+            description: 'Database is unavailable or not ready.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiErrorResponse' },
               },
             },
           },
@@ -406,10 +446,74 @@ export const openApiSpec = {
         },
       },
     },
+    '/users/{username}/posts': {
+      get: {
+        summary: 'Get user posts feed',
+        description: 'Returns a paginated list of posts authored by the specified user, sorted newest first.',
+        tags: ['Users'],
+        parameters: [
+          {
+            name: 'username',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Username of the author',
+          },
+          {
+            name: 'page',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 1 },
+            description: 'Page number',
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 10, maximum: 50 },
+            description: 'Number of posts per page (max 50)',
+          },
+        ],
+        responses: {
+          200: {
+            description: 'User posts retrieved successfully.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    message: { type: 'string', example: 'User posts retrieved successfully' },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        posts: {
+                          type: 'array',
+                          items: { $ref: '#/components/schemas/Post' },
+                        },
+                        pagination: { $ref: '#/components/schemas/PaginationMeta' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          404: {
+            description: 'User not found.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiErrorResponse' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/users/me': {
       patch: {
         summary: 'Update own user profile',
-        description: 'Updates display name, bio, or avatar URL for the authenticated user.',
+        description: 'Updates username, display name, or bio for the authenticated user.',
         tags: ['Users'],
         security: [{ cookieAuth: [] }],
         requestBody: {

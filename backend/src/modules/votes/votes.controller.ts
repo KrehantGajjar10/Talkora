@@ -1,6 +1,5 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import * as votesService from './votes.service.js';
-import { VotesError } from './votes.service.js';
 import { sendSuccess, sendError } from '../../utils/api-response.js';
 
 function getParam(param: string | string[] | undefined): string | null {
@@ -8,7 +7,11 @@ function getParam(param: string | string[] | undefined): string | null {
   return Array.isArray(param) ? param[0] : param;
 }
 
-export async function castVote(req: Request, res: Response): Promise<void> {
+export async function castVote(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     if (!req.user) {
       sendError(res, 401, 'Authentication required', []);
@@ -29,15 +32,15 @@ export async function castVote(req: Request, res: Response): Promise<void> {
 
     sendSuccess(res, 200, 'Vote recorded successfully', result);
   } catch (error) {
-    if (error instanceof VotesError) {
-      sendError(res, error.statusCode, error.message, []);
-      return;
-    }
-    sendError(res, 500, 'Failed to record vote', []);
+    next(error);
   }
 }
 
-export async function getVote(req: Request, res: Response): Promise<void> {
+export async function getVote(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     const postId = getParam(req.params.postId);
     if (!postId) {
@@ -48,15 +51,15 @@ export async function getVote(req: Request, res: Response): Promise<void> {
     const result = await votesService.getPostVoteData(postId, req.user?.id);
     sendSuccess(res, 200, 'Vote data retrieved successfully', result);
   } catch (error) {
-    if (error instanceof VotesError) {
-      sendError(res, error.statusCode, error.message, []);
-      return;
-    }
-    sendError(res, 500, 'Failed to retrieve vote data', []);
+    next(error);
   }
 }
 
-export async function removeVote(req: Request, res: Response): Promise<void> {
+export async function removeVote(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     if (!req.user) {
       sendError(res, 401, 'Authentication required', []);
@@ -72,10 +75,6 @@ export async function removeVote(req: Request, res: Response): Promise<void> {
     const result = await votesService.removeVote(req.user.id, postId);
     sendSuccess(res, 200, 'Vote removed successfully', result);
   } catch (error) {
-    if (error instanceof VotesError) {
-      sendError(res, error.statusCode, error.message, []);
-      return;
-    }
-    sendError(res, 500, 'Failed to remove vote', []);
+    next(error);
   }
 }

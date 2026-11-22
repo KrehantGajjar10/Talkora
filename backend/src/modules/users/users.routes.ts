@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import * as usersController from './users.controller.js';
-import { authenticate } from '../../middlewares/auth.middleware.js';
-import { validateBody } from '../../middlewares/validate.middleware.js';
-import { updateProfileSchema } from './users.validation.js';
+import { authenticate, optionalAuthenticate } from '../../middlewares/auth.middleware.js';
+import { validateBody, validateQuery } from '../../middlewares/validate.middleware.js';
+import { updateProfileSchema, userPostsQuerySchema } from './users.validation.js';
 
 const router = Router();
 
@@ -12,6 +12,14 @@ router.patch(
   authenticate,
   validateBody(updateProfileSchema),
   usersController.updateProfile
+);
+
+// GET /api/users/:username/posts (Public, optional auth for vote state)
+router.get(
+  '/:username/posts',
+  optionalAuthenticate,
+  validateQuery(userPostsQuerySchema),
+  usersController.getUserPosts
 );
 
 // GET /api/users/:username (Public)

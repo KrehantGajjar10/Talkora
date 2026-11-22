@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import * as authService from './auth.service.js';
 import {
   ACCESS_COOKIE_NAME,
@@ -10,7 +10,11 @@ import {
 } from '../../config/auth.js';
 import { sendSuccess, sendError } from '../../utils/api-response.js';
 
-export async function register(req: Request, res: Response): Promise<void> {
+export async function register(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     const result = await authService.register(req.body);
 
@@ -29,15 +33,15 @@ export async function register(req: Request, res: Response): Promise<void> {
       user: result.user,
     });
   } catch (error) {
-    if (error instanceof authService.AuthError) {
-      sendError(res, error.statusCode, error.message, []);
-      return;
-    }
-    sendError(res, 500, 'Registration failed', []);
+    next(error);
   }
 }
 
-export async function login(req: Request, res: Response): Promise<void> {
+export async function login(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     const result = await authService.login(req.body);
 
@@ -56,15 +60,15 @@ export async function login(req: Request, res: Response): Promise<void> {
       user: result.user,
     });
   } catch (error) {
-    if (error instanceof authService.AuthError) {
-      sendError(res, error.statusCode, error.message, []);
-      return;
-    }
-    sendError(res, 500, 'Login failed', []);
+    next(error);
   }
 }
 
-export async function refresh(req: Request, res: Response): Promise<void> {
+export async function refresh(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     const rawRefreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
     const result = await authService.refresh(rawRefreshToken);
@@ -82,15 +86,15 @@ export async function refresh(req: Request, res: Response): Promise<void> {
 
     sendSuccess(res, 200, 'Session refreshed successfully', {});
   } catch (error) {
-    if (error instanceof authService.AuthError) {
-      sendError(res, error.statusCode, error.message, []);
-      return;
-    }
-    sendError(res, 500, 'Session refresh failed', []);
+    next(error);
   }
 }
 
-export async function logout(req: Request, res: Response): Promise<void> {
+export async function logout(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     const rawRefreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
     const rawAccessToken = req.cookies?.[ACCESS_COOKIE_NAME];
@@ -100,15 +104,19 @@ export async function logout(req: Request, res: Response): Promise<void> {
     res.clearCookie(REFRESH_COOKIE_NAME, getClearRefreshCookieOptions());
 
     sendSuccess(res, 200, 'Logged out successfully', {});
-  } catch {
+  } catch (error) {
+    // Always clear credentials from client, but propagate DB failure to error handler
     res.clearCookie(ACCESS_COOKIE_NAME, getClearAccessCookieOptions());
     res.clearCookie(REFRESH_COOKIE_NAME, getClearRefreshCookieOptions());
-
-    sendSuccess(res, 200, 'Logged out successfully', {});
+    next(error);
   }
 }
 
-export async function getMe(req: Request, res: Response): Promise<void> {
+export async function getMe(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     if (!req.user) {
       sendError(res, 401, 'Authentication required', []);
@@ -118,10 +126,6 @@ export async function getMe(req: Request, res: Response): Promise<void> {
     const user = await authService.getCurrentUser(req.user.id);
     sendSuccess(res, 200, 'Current user retrieved', { user });
   } catch (error) {
-    if (error instanceof authService.AuthError) {
-      sendError(res, error.statusCode, error.message, []);
-      return;
-    }
-    sendError(res, 500, 'Failed to retrieve user profile', []);
+    next(error);
   }
 }

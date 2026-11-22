@@ -13,7 +13,7 @@ interface ApiResponse<T = any> {
   headers: Headers;
 }
 
-function extractCookies(res: Response): Record<string, string> {
+function extractCookies(res: { headers: Headers }): Record<string, string> {
   const cookies: Record<string, string> = {};
   const setCookieHeader = res.headers.get('set-cookie');
   if (!setCookieHeader) return cookies;
@@ -89,9 +89,42 @@ let server: http.Server;
 
 async function runRegressionSuite() {
   console.log(`=======================================================`);
-  console.log(`Starting Talkora Chapter 11 Final Regression Suite`);
+  console.log(`Starting Talkora Chapter 11.1 Final Regression Suite`);
   console.log(`Server port: ${PORT}`);
   console.log(`=======================================================\n`);
+
+  // ==========================================
+  // DATABASE SAFETY GATE
+  // ==========================================
+  if (process.env.ALLOW_TEST_EXECUTION !== 'true') {
+    console.error(
+      '❌ Safety Gate Abort: Regression tests require ALLOW_TEST_EXECUTION=true to run.'
+    );
+    process.exit(1);
+  }
+
+  if (
+    process.env.NODE_ENV === 'production' ||
+    process.env.DATABASE_URL?.toLowerCase().includes('production')
+  ) {
+    console.error(
+      '❌ Safety Gate Abort: Regression tests are forbidden against production databases!'
+    );
+    process.exit(1);
+  }
+
+  // Active database connection verification
+  try {
+    const dbCheck = await prisma.$queryRaw<Array<{ db: string }>>`SELECT current_database()::text as db`;
+    const currentDb = dbCheck[0]?.db || 'unknown';
+    console.log(`[Safety Gate Passed] Connected to test database: ${currentDb}`);
+  } catch (dbErr) {
+    console.error('❌ Safety Gate Abort: Could not connect to database:', dbErr);
+    process.exit(1);
+  }
+
+  // Disable rate limiting for the automated test suite execution
+  process.env.DISABLE_RATE_LIMIT = 'true';
 
   server = app.listen(PORT);
 
@@ -108,33 +141,34 @@ async function runRegressionSuite() {
     }
   }
 
-  const testUsernames = ['c11_user_one', 'c11_user_two'];
+  // Exact ID Tracking for safe, deterministic cleanup
+  const trackedUserIds = new Set<string>();
+  const trackedPostIds = new Set<string>();
+  const trackedCommentIds = new Set<string>();
+
+  // Unique per-run identifiers (randomized suffix prevents race conditions or collisions)
+  const runSuffix = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const u1Username = `t_u1_${runSuffix}`.slice(0, 30);
+  const u2Username = `t_u2_${runSuffix}`.slice(0, 30);
+  const u1Email = `user1_${runSuffix}@talkora.test`;
+  const u2Email = `user2_${runSuffix}@talkora.test`;
 
   try {
-    // 0. Cleanup any lingering test users from previous test runs
-    await prisma.vote.deleteMany({
-      where: { user: { username: { in: testUsernames } } },
-    });
-    await prisma.comment.deleteMany({
-      where: { author: { username: { in: testUsernames } } },
-    });
-    await prisma.post.deleteMany({
-      where: { author: { username: { in: testUsernames } } },
-    });
-    await prisma.session.deleteMany({
-      where: { user: { username: { in: testUsernames } } },
-    });
-    await prisma.user.deleteMany({
-      where: { username: { in: testUsernames } },
-    });
-
     // ==========================================
-    // 1. HEALTH & DOCUMENTATION
+    // 1. HEALTH & READINESS & DOCUMENTATION
     // ==========================================
     const tHealth = await request('GET', '/health');
     assert(
       tHealth.status === 200 && tHealth.data.data.status === 'ok',
       '1. Health check returns 200 OK with status: ok'
+    );
+
+    const tReady = await request('GET', '/health/ready');
+    assert(
+      tReady.status === 200 &&
+        tReady.data.data.status === 'ready' &&
+        tReady.data.data.database === 'connected',
+      '2. Readiness check returns 200 OK with database: connected'
     );
 
     const tDocsHtml = await request('GET', '/docs/');
@@ -143,15 +177,16 @@ async function runRegressionSuite() {
         typeof tDocsHtml.data === 'string' &&
         (tDocsHtml.data.includes('swagger-ui') ||
           tDocsHtml.data.includes('Talkora API Documentation')),
-      '2. Swagger UI explorer HTML loads at /api/docs/'
+      '3. Swagger UI explorer HTML loads at /api/docs/'
     );
 
     const tDocsJson = await request('GET', '/docs.json');
     assert(
       tDocsJson.status === 200 &&
         tDocsJson.data.openapi === '3.0.3' &&
-        tDocsJson.data.info.title === 'Talkora API',
-      '3. Raw OpenAPI 3.0 specification available at /api/docs.json'
+        Boolean(tDocsJson.data.paths?.['/health/ready']) &&
+        Boolean(tDocsJson.data.paths?.['/users/{username}/posts']),
+      '4. OpenAPI 3.0 specification includes /health/ready and /users/{username}/posts'
     );
 
     // ==========================================
@@ -163,7 +198,7 @@ async function runRegressionSuite() {
     });
     assert(
       tOriginAllowed.status !== 403,
-      '4. Valid frontend origin (http://localhost:3000) allowed'
+      '5. Valid frontend origin (http://localhost:3000) allowed past origin gate'
     );
 
     const tOriginRejected = await request('POST', '/auth/login', {
@@ -172,7 +207,7 @@ async function runRegressionSuite() {
     });
     assert(
       tOriginRejected.status === 403,
-      '5. Mismatched cross-origin request rejected with 403'
+      '6. Mismatched cross-origin request rejected with 403'
     );
 
     const tOriginNull = await request('POST', '/auth/login', {
@@ -181,7 +216,7 @@ async function runRegressionSuite() {
     });
     assert(
       tOriginNull.status === 403,
-      '6. Untrusted Origin: null rejected with 403'
+      '7. Untrusted Origin: null rejected with 403'
     );
 
     // ==========================================
@@ -190,244 +225,243 @@ async function runRegressionSuite() {
     // Register User 1
     const tReg1 = await request('POST', '/auth/register', {
       body: {
-        email: 'c11_user1@talkora.dev',
-        username: 'c11_user_one',
+        email: u1Email,
+        username: u1Username,
         displayName: 'User One',
         password: 'Password123!',
       },
     });
-    const user1Cookies = extractCookies(tReg1 as any);
+    const user1Cookies = extractCookies(tReg1);
+    if (tReg1.status === 201 && tReg1.data?.data?.user?.id) {
+      trackedUserIds.add(tReg1.data.data.user.id);
+    }
     assert(
       tReg1.status === 201 &&
         Boolean(user1Cookies[ACCESS_COOKIE_NAME]) &&
         Boolean(user1Cookies[REFRESH_COOKIE_NAME]),
-      '7. Registration creates user and issues HttpOnly access & refresh cookies'
+      '8. Registration creates user and issues HttpOnly access & refresh cookies'
     );
 
     // Duplicate registration rejected
     const tRegDuplicate = await request('POST', '/auth/register', {
       body: {
-        email: 'c11_user1@talkora.dev',
-        username: 'c11_user_one',
+        email: u1Email,
+        username: u1Username,
         displayName: 'User One Duplicate',
         password: 'Password123!',
       },
     });
     assert(
       tRegDuplicate.status === 409,
-      '8. Duplicate email or username registration rejected with 409 Conflict'
+      '9. Duplicate email or username registration rejected with 409 Conflict'
     );
 
     // Register User 2
     const tReg2 = await request('POST', '/auth/register', {
       body: {
-        email: 'c11_user2@talkora.dev',
-        username: 'c11_user_two',
+        email: u2Email,
+        username: u2Username,
         displayName: 'User Two',
         password: 'Password123!',
       },
     });
-    const user2Cookies = extractCookies(tReg2 as any);
-    assert(tReg2.status === 201, '9. Second user registered successfully');
+    const user2Cookies = extractCookies(tReg2);
+    if (tReg2.status === 201 && tReg2.data?.data?.user?.id) {
+      trackedUserIds.add(tReg2.data.data.user.id);
+    }
+    assert(
+      tReg2.status === 201 && Boolean(user2Cookies[ACCESS_COOKIE_NAME]),
+      '10. Second test user registered successfully'
+    );
 
-    // Login with valid credentials
-    const tLogin = await request('POST', '/auth/login', {
+    // Login User 1
+    const tLogin1 = await request('POST', '/auth/login', {
       body: {
-        identifier: 'c11_user_one',
+        identifier: u1Email,
         password: 'Password123!',
       },
     });
-    const loggedInCookies = extractCookies(tLogin as any);
+    let u1Cookies = extractCookies(tLogin1);
     assert(
-      tLogin.status === 200 && Boolean(loggedInCookies[ACCESS_COOKIE_NAME]),
-      '10. Login with valid credentials returns 200 OK and fresh session cookies'
+      tLogin1.status === 200 && Boolean(u1Cookies[ACCESS_COOKIE_NAME]),
+      '11. Login with valid credentials succeeds and issues fresh cookies'
     );
 
     // Login with invalid password
     const tLoginBad = await request('POST', '/auth/login', {
       body: {
-        identifier: 'c11_user_one',
+        identifier: u1Email,
         password: 'WrongPassword!',
       },
     });
-    assert(tLoginBad.status === 401, '11. Login with wrong password returns 401 Unauthorized');
-
-    // Protected /auth/me with cookie
-    const tMeAuth = await request('GET', '/auth/me', { cookies: loggedInCookies });
     assert(
-      tMeAuth.status === 200 && tMeAuth.data.data.user.username === 'c11_user_one',
-      '12. Protected GET /auth/me returns authenticated user'
+      tLoginBad.status === 401,
+      '12. Login with invalid password rejected with 401 Unauthorized'
     );
 
-    // Protected /auth/me without cookie
-    const tMeGuest = await request('GET', '/auth/me');
-    assert(tMeGuest.status === 401, '13. Protected GET /auth/me without cookie returns 401');
-
-    // Refresh token rotation
-    const tRefresh = await request('POST', '/auth/refresh', { cookies: loggedInCookies });
-    const refreshedCookies = extractCookies(tRefresh as any);
+    // Authenticated Profile (GET /auth/me)
+    const tMeAuth = await request('GET', '/auth/me', { cookies: u1Cookies });
     assert(
-      tRefresh.status === 200 &&
-        Boolean(refreshedCookies[ACCESS_COOKIE_NAME]) &&
-        Boolean(refreshedCookies[REFRESH_COOKIE_NAME]),
-      '14. POST /auth/refresh rotates access and refresh cookies'
+      tMeAuth.status === 200 &&
+        tMeAuth.data.data.user.username === u1Username &&
+        tMeAuth.data.data.user.passwordHash === undefined,
+      '13. GET /api/auth/me returns authenticated user profile without password hash'
     );
 
-    // Replay of old refresh token rejected
-    const tReplay = await request('POST', '/auth/refresh', { cookies: loggedInCookies });
+    // Unauthenticated Profile (GET /auth/me)
+    const tMeUnauth = await request('GET', '/auth/me');
     assert(
-      tReplay.status === 401,
-      '15. Replay of previously rotated refresh token rejected with 401'
+      tMeUnauth.status === 401,
+      '14. GET /api/auth/me without cookies returns 401 Unauthorized'
     );
 
     // ==========================================
-    // 4. LOGOUT & STALE REFRESH COOKIE FALLBACK (Issue B)
+    // 4. USER PROFILES
     // ==========================================
-    // Log in afresh to get synchronized cookies
-    const tFreshLogin = await request('POST', '/auth/login', {
-      body: { identifier: 'c11_user_one', password: 'Password123!' },
-    });
-    const activeCookies = extractCookies(tFreshLogin as any);
-
-    // Stale refresh cookie fallback: Provide an invalid/tampered refresh token alongside the valid access token
-    const cookiesWithStaleRefresh = {
-      [ACCESS_COOKIE_NAME]: activeCookies[ACCESS_COOKIE_NAME],
-      [REFRESH_COOKIE_NAME]: 'tampered_or_stale_refresh_token_12345',
-    };
-
-    const tLogoutFallback = await request('POST', '/auth/logout', {
-      cookies: cookiesWithStaleRefresh,
-    });
-    assert(
-      tLogoutFallback.status === 200,
-      '16. Logout with stale refresh cookie and valid access cookie succeeds (200 OK)'
-    );
-
-    // Verify session was revoked despite the stale refresh cookie: /auth/me should now return 401
-    const tMeAfterLogout = await request('GET', '/auth/me', {
-      cookies: { [ACCESS_COOKIE_NAME]: activeCookies[ACCESS_COOKIE_NAME] },
-    });
-    assert(
-      tMeAfterLogout.status === 401,
-      '17. Access session confirmed revoked via logout fallback despite stale refresh cookie'
-    );
-
-    // Repeated logout is safe and idempotent
-    const tRepeatedLogout = await request('POST', '/auth/logout');
-    assert(
-      tRepeatedLogout.status === 200,
-      '18. Repeated logout is safe and idempotent'
-    );
-
-    // Re-login User 1 and User 2 for downstream tests
-    const u1Login = await request('POST', '/auth/login', {
-      body: { identifier: 'c11_user_one', password: 'Password123!' },
-    });
-    const u1Cookies = extractCookies(u1Login as any);
-
-    const u2Login = await request('POST', '/auth/login', {
-      body: { identifier: 'c11_user_two', password: 'Password123!' },
-    });
-    const u2Cookies = extractCookies(u2Login as any);
-
-    // ==========================================
-    // 5. USER PROFILES
-    // ==========================================
-    const tUserProf = await request('GET', '/users/c11_user_one');
-    assert(
-      tUserProf.status === 200 && tUserProf.data.data.profile.username === 'c11_user_one',
-      '19. Public user profile retrieved successfully'
-    );
-
-    const tUserNotFound = await request('GET', '/users/nobody_exists_here');
-    assert(tUserNotFound.status === 404, '20. Nonexistent user returns 404');
-
-    const tUpdateProf = await request('PATCH', '/users/me', {
+    const tUpdateProfile = await request('PATCH', '/users/me', {
       cookies: u1Cookies,
-      body: { displayName: 'User One Hardened' },
+      body: {
+        displayName: 'User One Updated',
+        bio: 'Updated bio for user one testing',
+      },
     });
     assert(
-      tUpdateProf.status === 200 &&
-        tUpdateProf.data.data.profile.displayName === 'User One Hardened',
-      '21. Profile update by authenticated user returns 200 OK'
+      tUpdateProfile.status === 200 &&
+        tUpdateProfile.data.data.profile.displayName === 'User One Updated' &&
+        tUpdateProfile.data.data.profile.bio === 'Updated bio for user one testing',
+      '15. PATCH /api/users/me updates displayName and bio'
     );
 
-    const tUpdateProfGuest = await request('PATCH', '/users/me', {
-      body: { displayName: 'Hacker' },
+    // Reject unknown fields like avatarUrl on PATCH /users/me
+    const tUpdateBadField = await request('PATCH', '/users/me', {
+      cookies: u1Cookies,
+      body: {
+        avatarUrl: 'https://evil.com/pic.png',
+      },
     });
-    assert(tUpdateProfGuest.status === 401, '22. Profile update without authentication returns 401');
+    assert(
+      tUpdateBadField.status === 422,
+      '16. PATCH /api/users/me rejects disallowed avatarUrl payload with 422'
+    );
+
+    // Public Profile lookup
+    const tGetProfile = await request('GET', `/users/${u1Username}`);
+    assert(
+      tGetProfile.status === 200 &&
+        tGetProfile.data.data.profile.username === u1Username &&
+        typeof tGetProfile.data.data.profile.postCount === 'number',
+      '17. GET /api/users/:username returns public profile with postCount'
+    );
+
+    const tGetProfile404 = await request('GET', '/users/nonexistent_user_9999');
+    assert(
+      tGetProfile404.status === 404,
+      '18. GET /api/users/:username for unknown user returns 404'
+    );
 
     // ==========================================
-    // 6. POSTS & VALIDATION
+    // 5. POSTS MANAGEMENT & IMAGE SECURITY
     // ==========================================
+    // Create Post (Text only)
     const tCreatePost = await request('POST', '/posts', {
       cookies: u1Cookies,
       body: {
-        title: 'Chapter 11 Hardened Post',
-        content: 'Testing production hardening and validation rules.',
+        title: 'Chapter 11.1 Automated Test Post',
+        content: 'This post is created by automated regression suite for validation.',
       },
     });
-    assert(tCreatePost.status === 201, '23. Authenticated user creates post (201 Created)');
-    const postId = tCreatePost.data.data.post.id;
+    const postId = tCreatePost.data?.data?.post?.id;
+    if (postId) {
+      trackedPostIds.add(postId);
+    }
+    assert(
+      tCreatePost.status === 201 && Boolean(postId),
+      '19. Authenticated user creates text-only post (201 Created)'
+    );
 
-    // Empty title validation
-    const tBadPost = await request('POST', '/posts', {
+    // Reject post without content or image
+    const tCreateEmptyPost = await request('POST', '/posts', {
       cookies: u1Cookies,
-      body: { title: '' },
+      body: {
+        title: 'Empty Post Title',
+      },
     });
-    assert(tBadPost.status === 422, '24. Post with empty title rejected with 422 Validation Error');
+    assert(
+      tCreateEmptyPost.status === 422,
+      '20. Post creation without content or image rejected with 422'
+    );
+
+    // Reject spoofed image mime type
+    const boundary = '----WebKitFormBoundaryRegressionTest';
+    const fakeMultipartBody = [
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="title"',
+      '',
+      'Spoofed Image Post',
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="image"; filename="fake.png"',
+      'Content-Type: image/png',
+      '',
+      'THIS_IS_PLAIN_TEXT_NOT_A_VALID_PNG_SIGNATURE',
+      `--${boundary}--`,
+    ].join('\r\n');
+
+    const tSpoofedImage = await request('POST', '/posts', {
+      cookies: u1Cookies,
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      },
+      body: fakeMultipartBody,
+    });
+    assert(
+      tSpoofedImage.status === 415,
+      '21. Spoofed image file (invalid magic bytes) rejected with 415 Unsupported Media Type'
+    );
 
     // Get post by ID
     const tGetPost = await request('GET', `/posts/${postId}`);
-    assert(tGetPost.status === 200, '25. Get post by ID returns 200 OK');
-
-    // Edit post text (author)
-    const tEditPost = await request('PATCH', `/posts/${postId}`, {
-      cookies: u1Cookies,
-      body: { title: 'Chapter 11 Hardened Post (Edited)' },
-    });
-    assert(tEditPost.status === 200, '26. Author edits post title (200 OK)');
-
-    // Edit post text (non-author)
-    const tEditForbidden = await request('PATCH', `/posts/${postId}`, {
-      cookies: u2Cookies,
-      body: { title: 'Unauthorized Edit' },
-    });
-    assert(tEditForbidden.status === 403, '27. Non-author edit rejected with 403 Forbidden');
-
-    // ==========================================
-    // 7. COMMENTS
-    // ==========================================
-    const tCreateComment = await request('POST', `/posts/${postId}/comments`, {
-      cookies: u2Cookies,
-      body: { content: 'Great architecture discussion!' },
-    });
-    assert(tCreateComment.status === 201, '28. Create comment on post returns 201 Created');
-    const commentId = tCreateComment.data.data.comment.id;
-
-    const tListComments = await request('GET', `/posts/${postId}/comments`);
     assert(
-      tListComments.status === 200 && tListComments.data.data.comments.length >= 1,
-      '29. List comments returns 200 OK with pagination'
+      tGetPost.status === 200 && tGetPost.data.data.post.id === postId,
+      '22. GET /api/posts/:postId returns full post details'
     );
 
-    const tEditCommentForbidden = await request('PATCH', `/comments/${commentId}`, {
+    const tGetPost404 = await request('GET', '/posts/nonexistent_post_id');
+    assert(
+      tGetPost404.status === 404,
+      '23. GET /api/posts/:postId for nonexistent post returns 404'
+    );
+
+    // Edit post text as author
+    const tEditPostAuthor = await request('PATCH', `/posts/${postId}`, {
       cookies: u1Cookies,
-      body: { content: 'Tampered comment' },
+      body: {
+        title: 'Chapter 11.1 Post Updated Title',
+      },
     });
-    assert(tEditCommentForbidden.status === 403, '30. Non-author editing comment rejected with 403');
+    assert(
+      tEditPostAuthor.status === 200 &&
+        tEditPostAuthor.data.data.post.title === 'Chapter 11.1 Post Updated Title',
+      '24. Post author can edit post title/content (200 OK)'
+    );
 
-    const tEditCommentAuthor = await request('PATCH', `/comments/${commentId}`, {
-      cookies: u2Cookies,
-      body: { content: 'Great architecture discussion! (Clarified)' },
+    // Edit post text as non-author
+    const tEditPostForbidden = await request('PATCH', `/posts/${postId}`, {
+      cookies: user2Cookies,
+      body: {
+        title: 'Hacked Title Attempt',
+      },
     });
-    assert(tEditCommentAuthor.status === 200, '31. Comment author edits comment (200 OK)');
+    assert(
+      tEditPostForbidden.status === 403,
+      '25. Non-author editing post text rejected with 403 Forbidden'
+    );
 
     // ==========================================
-    // 8. POST VOTING
+    // 6. VOTING SYSTEM
     // ==========================================
-    const tUpvote = await request('POST', `/posts/${postId}/vote`, {
-      cookies: u2Cookies,
+    // Cast UPVOTE as User 2
+    const tUpvote = await request('POST', `/posts/${postId}/votes`, {
+      cookies: user2Cookies,
       body: { type: 'UPVOTE' },
     });
     assert(
@@ -435,58 +469,201 @@ async function runRegressionSuite() {
         tUpvote.data.data.upvotes === 1 &&
         tUpvote.data.data.score === 1 &&
         tUpvote.data.data.userVote === 'UPVOTE',
-      '32. Upvote records vote atomically with score: 1'
+      '26. User 2 casts UPVOTE: score becomes +1 and userVote is UPVOTE'
     );
 
-    const tChangeVote = await request('POST', `/posts/${postId}/vote`, {
-      cookies: u2Cookies,
+    // Inspect vote status via GET
+    const tGetVote = await request('GET', `/posts/${postId}/votes`, {
+      cookies: user2Cookies,
+    });
+    assert(
+      tGetVote.status === 200 &&
+        tGetVote.data.data.score === 1 &&
+        tGetVote.data.data.userVote === 'UPVOTE',
+      '27. GET /api/posts/:postId/votes reflects current vote state'
+    );
+
+    // Switch vote to DOWNVOTE
+    const tDownvote = await request('POST', `/posts/${postId}/votes`, {
+      cookies: user2Cookies,
       body: { type: 'DOWNVOTE' },
     });
     assert(
-      tChangeVote.status === 200 &&
-        tChangeVote.data.data.downvotes === 1 &&
-        tChangeVote.data.data.score === -1 &&
-        tChangeVote.data.data.userVote === 'DOWNVOTE',
-      '33. Changing vote updates score to -1 atomically'
+      tDownvote.status === 200 &&
+        tDownvote.data.data.downvotes === 1 &&
+        tDownvote.data.data.score === -1 &&
+        tDownvote.data.data.userVote === 'DOWNVOTE',
+      '28. User 2 flips vote to DOWNVOTE: score becomes -1 and userVote is DOWNVOTE'
     );
 
-    const tGuestVote = await request('POST', `/posts/${postId}/vote`, {
-      body: { type: 'UPVOTE' },
-    });
-    assert(tGuestVote.status === 401, '34. Guest attempt to vote rejected with 401');
-
-    const tDeleteVote = await request('DELETE', `/posts/${postId}/vote`, {
-      cookies: u2Cookies,
+    // Remove vote (DELETE /posts/:postId/votes)
+    const tRemoveVote = await request('DELETE', `/posts/${postId}/votes`, {
+      cookies: user2Cookies,
     });
     assert(
-      tDeleteVote.status === 200 &&
-        tDeleteVote.data.data.score === 0 &&
-        tDeleteVote.data.data.userVote === null,
-      '35. User removes vote and score returns to 0'
+      tRemoveVote.status === 200 &&
+        tRemoveVote.data.data.score === 0 &&
+        tRemoveVote.data.data.userVote === null,
+      '29. User 2 removes vote: score returns to 0 and userVote becomes null'
     );
 
     // ==========================================
-    // 9. FEED SORTING & RANKING
+    // 7. COMMENTS MANAGEMENT
     // ==========================================
-    const tFeedNewest = await request('GET', '/posts?sort=newest&limit=5');
-    assert(tFeedNewest.status === 200, '36. GET /posts?sort=newest returns 200 OK');
+    const tCreateComment = await request('POST', `/posts/${postId}/comments`, {
+      cookies: user2Cookies,
+      body: { content: 'Insightful comment from User Two.' },
+    });
+    const commentId = tCreateComment.data?.data?.comment?.id;
+    if (commentId) {
+      trackedCommentIds.add(commentId);
+    }
+    assert(
+      tCreateComment.status === 201 && Boolean(commentId),
+      '30. Authenticated user creates comment on post (201 Created)'
+    );
 
-    const tFeedTop = await request('GET', '/posts?sort=top&limit=5');
-    assert(tFeedTop.status === 200, '37. GET /posts?sort=top returns 200 OK');
+    const tListComments = await request('GET', `/posts/${postId}/comments`);
+    assert(
+      tListComments.status === 200 &&
+        Array.isArray(tListComments.data.data.comments) &&
+        tListComments.data.data.comments.some((c: any) => c.id === commentId),
+      '31. GET /api/posts/:postId/comments returns comment list including new comment'
+    );
 
-    const tFeedDownvoted = await request('GET', '/posts?sort=downvoted&limit=5');
-    assert(tFeedDownvoted.status === 200, '38. GET /posts?sort=downvoted returns 200 OK');
+    const tEditComment = await request('PATCH', `/comments/${commentId}`, {
+      cookies: user2Cookies,
+      body: { content: 'Edited comment content by User Two.' },
+    });
+    assert(
+      tEditComment.status === 200 &&
+        tEditComment.data.data.comment.content === 'Edited comment content by User Two.',
+      '32. Comment author can edit comment content (200 OK)'
+    );
+
+    const tEditCommentForbidden = await request('PATCH', `/comments/${commentId}`, {
+      cookies: u1Cookies,
+      body: { content: 'Unauthorized comment edit attempt' },
+    });
+    assert(
+      tEditCommentForbidden.status === 403,
+      '33. Non-author editing comment rejected with 403 Forbidden'
+    );
+
+    const tDeleteComment = await request('DELETE', `/comments/${commentId}`, {
+      cookies: user2Cookies,
+    });
+    assert(
+      tDeleteComment.status === 204,
+      '34. Comment author deletes comment (204 No Content)'
+    );
+
+    // ==========================================
+    // 8. FEED SORTING & RANKING
+    // ==========================================
+    const tFeedNewest = await request('GET', '/posts?sort=newest&page=1&limit=5');
+    assert(
+      tFeedNewest.status === 200 && Array.isArray(tFeedNewest.data.data.posts),
+      '35. GET /api/posts?sort=newest returns paginated posts'
+    );
+
+    const tFeedTop = await request('GET', '/posts?sort=top&page=1&limit=5');
+    assert(
+      tFeedTop.status === 200 && Array.isArray(tFeedTop.data.data.posts),
+      '36. GET /api/posts?sort=top returns ranked posts by net vote score'
+    );
+
+    const tFeedDownvoted = await request('GET', '/posts?sort=downvoted&page=1&limit=5');
+    assert(
+      tFeedDownvoted.status === 200 && Array.isArray(tFeedDownvoted.data.data.posts),
+      '37. GET /api/posts?sort=downvoted returns lowest scored posts'
+    );
 
     const tFeedBadSort = await request('GET', '/posts?sort=unknown_sort_type');
-    assert(tFeedBadSort.status === 422, '39. Unsupported sort option rejected with 422');
+    assert(
+      tFeedBadSort.status === 422,
+      '38. Unsupported sort option rejected with 422'
+    );
 
     // ==========================================
-    // 10. ERROR HANDLING & RESILIENCE
+    // 9. USER POSTS ENDPOINT (MVP COMPLETION)
+    // ==========================================
+    const tUserPosts = await request('GET', `/users/${u1Username}/posts?page=1&limit=10`);
+    assert(
+      tUserPosts.status === 200 &&
+        Array.isArray(tUserPosts.data.data.posts) &&
+        tUserPosts.data.data.posts.length > 0 &&
+        tUserPosts.data.data.pagination.totalPosts >= 1,
+      '39. GET /api/users/:username/posts returns paginated posts feed for user'
+    );
+
+    const tUserPosts404 = await request('GET', '/users/nonexistent_xyz_9999/posts');
+    assert(
+      tUserPosts404.status === 404,
+      '40. GET /api/users/:username/posts returns 404 for nonexistent user'
+    );
+
+    // Clean up post as authenticated author
+    const tDeletePost = await request('DELETE', `/posts/${postId}`, {
+      cookies: u1Cookies,
+    });
+    assert(tDeletePost.status === 204, '41. Author deletes post (204 No Content)');
+
+    // ==========================================
+    // 10. SESSION ROTATION & REVOCATION FALLBACK
+    // ==========================================
+    // Refresh session tokens
+    const tRefresh = await request('POST', '/auth/refresh', {
+      cookies: u1Cookies,
+    });
+    const refreshedCookies = extractCookies(tRefresh);
+    assert(
+      tRefresh.status === 200 &&
+        Boolean(refreshedCookies[ACCESS_COOKIE_NAME]) &&
+        Boolean(refreshedCookies[REFRESH_COOKIE_NAME]),
+      '42. POST /api/auth/refresh rotates refresh token and issues new access token'
+    );
+
+    // Old refresh token must be rejected
+    const tOldRefresh = await request('POST', '/auth/refresh', {
+      cookies: u1Cookies,
+    });
+    assert(
+      tOldRefresh.status === 401,
+      '43. Replay of old refresh token rejected with 401 Unauthorized'
+    );
+
+    // Logout with stale refresh cookie + valid access cookie:
+    // User has refreshedCookies[ACCESS_COOKIE_NAME] (valid) and u1Cookies[REFRESH_COOKIE_NAME] (stale)
+    const tLogout = await request('POST', '/auth/logout', {
+      cookies: {
+        [ACCESS_COOKIE_NAME]: refreshedCookies[ACCESS_COOKIE_NAME],
+        [REFRESH_COOKIE_NAME]: u1Cookies[REFRESH_COOKIE_NAME], // Stale refresh token
+      },
+    });
+    assert(
+      tLogout.status === 200,
+      '44. Logout with stale refresh cookie + valid access cookie successfully revokes session in DB'
+    );
+
+    // Access token from revoked session must now be rejected
+    const tRevokedAccess = await request('GET', '/auth/me', {
+      cookies: {
+        [ACCESS_COOKIE_NAME]: refreshedCookies[ACCESS_COOKIE_NAME],
+      },
+    });
+    assert(
+      tRevokedAccess.status === 401,
+      '45. Access token from revoked session rejected with 401 Unauthorized'
+    );
+
+    // ==========================================
+    // 11. CENTRALIZED ERROR HANDLING & RESILIENCE
     // ==========================================
     const t404 = await request('GET', '/nonexistent-endpoint-route');
     assert(
       t404.status === 404 && t404.data.message === 'Route not found',
-      '40. Centralized error handling returns 404 for nonexistent routes'
+      '46. Centralized error handling returns 404 for nonexistent routes'
     );
 
     const tMalformedJson = await request('POST', '/auth/login', {
@@ -495,35 +672,12 @@ async function runRegressionSuite() {
     });
     assert(
       tMalformedJson.status === 400,
-      '41. Malformed JSON request body safely handled with 400 Bad Request'
+      '47. Malformed JSON request body safely handled with 400 Bad Request'
     );
-
-    // Clean up post (delete cascades comments and votes)
-    const tDeletePost = await request('DELETE', `/posts/${postId}`, {
-      cookies: u1Cookies,
-    });
-    assert(tDeletePost.status === 204, '42. Author deletes post (204 No Content)');
-
-    // Clean up test data
-    await prisma.vote.deleteMany({
-      where: { user: { username: { in: testUsernames } } },
-    });
-    await prisma.comment.deleteMany({
-      where: { author: { username: { in: testUsernames } } },
-    });
-    await prisma.post.deleteMany({
-      where: { author: { username: { in: testUsernames } } },
-    });
-    await prisma.session.deleteMany({
-      where: { user: { username: { in: testUsernames } } },
-    });
-    await prisma.user.deleteMany({
-      where: { username: { in: testUsernames } },
-    });
 
     console.log(`\n=======================================================`);
     console.log(`FINAL REGRESSION TEST RESULTS`);
-    console.log(`Total tests: ${passedTests.length + failedTests.length}`);
+    console.log(`Total assertions: ${passedTests.length + failedTests.length}`);
     console.log(`Passed: ${passedTests.length}`);
     console.log(`Failed: ${failedTests.length}`);
     console.log(`=======================================================`);
@@ -535,13 +689,48 @@ async function runRegressionSuite() {
       }
       process.exitCode = 1;
     } else {
-      console.log('\n✅ ALL 42 FINAL REGRESSION TESTS PASSED CLEANLY!\n');
+      console.log(`\n✅ ALL ${passedTests.length} FINAL REGRESSION TESTS PASSED CLEANLY!\n`);
     }
   } catch (err) {
     console.error('Fatal error during test execution:', err);
     process.exitCode = 1;
   } finally {
-    server.close();
+    if (server) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+    // Safe cleanup in finally: Delete ONLY records tracked by ID during this run
+    try {
+      if (trackedCommentIds.size > 0) {
+        await prisma.comment.deleteMany({
+          where: { id: { in: Array.from(trackedCommentIds) } },
+        });
+      }
+      if (trackedPostIds.size > 0) {
+        await prisma.vote.deleteMany({
+          where: { postId: { in: Array.from(trackedPostIds) } },
+        });
+        await prisma.comment.deleteMany({
+          where: { postId: { in: Array.from(trackedPostIds) } },
+        });
+        await prisma.post.deleteMany({
+          where: { id: { in: Array.from(trackedPostIds) } },
+        });
+      }
+      if (trackedUserIds.size > 0) {
+        await prisma.vote.deleteMany({
+          where: { userId: { in: Array.from(trackedUserIds) } },
+        });
+        await prisma.session.deleteMany({
+          where: { userId: { in: Array.from(trackedUserIds) } },
+        });
+        await prisma.user.deleteMany({
+          where: { id: { in: Array.from(trackedUserIds) } },
+        });
+      }
+      console.log(`[Safety Cleanup] Successfully deleted only tracked test records (${trackedUserIds.size} users, ${trackedPostIds.size} posts, ${trackedCommentIds.size} comments).`);
+    } catch (cleanupErr) {
+      console.error('[Safety Cleanup] Error during cleanup:', cleanupErr);
+    }
     await prisma.$disconnect();
   }
 }

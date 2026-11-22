@@ -1,6 +1,5 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import * as commentsService from './comments.service.js';
-import { CommentsError } from './comments.service.js';
 import { sendSuccess, sendError } from '../../utils/api-response.js';
 
 function getParam(param: string | string[] | undefined): string | null {
@@ -8,7 +7,11 @@ function getParam(param: string | string[] | undefined): string | null {
   return Array.isArray(param) ? param[0] : param;
 }
 
-export async function createComment(req: Request, res: Response): Promise<void> {
+export async function createComment(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     if (!req.user) {
       sendError(res, 401, 'Authentication required', []);
@@ -29,15 +32,15 @@ export async function createComment(req: Request, res: Response): Promise<void> 
 
     sendSuccess(res, 201, 'Comment created successfully', { comment });
   } catch (error) {
-    if (error instanceof CommentsError) {
-      sendError(res, error.statusCode, error.message, []);
-      return;
-    }
-    sendError(res, 500, 'Failed to create comment', []);
+    next(error);
   }
 }
 
-export async function listComments(req: Request, res: Response): Promise<void> {
+export async function listComments(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     const postId = getParam(req.params.postId);
     if (!postId) {
@@ -55,15 +58,15 @@ export async function listComments(req: Request, res: Response): Promise<void> {
     const result = await commentsService.listComments(postId, page, limit);
     sendSuccess(res, 200, 'Comments retrieved successfully', result);
   } catch (error) {
-    if (error instanceof CommentsError) {
-      sendError(res, error.statusCode, error.message, []);
-      return;
-    }
-    sendError(res, 500, 'Failed to retrieve comments', []);
+    next(error);
   }
 }
 
-export async function editComment(req: Request, res: Response): Promise<void> {
+export async function editComment(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     if (!req.user) {
       sendError(res, 401, 'Authentication required', []);
@@ -84,15 +87,15 @@ export async function editComment(req: Request, res: Response): Promise<void> {
 
     sendSuccess(res, 200, 'Comment updated successfully', { comment });
   } catch (error) {
-    if (error instanceof CommentsError) {
-      sendError(res, error.statusCode, error.message, []);
-      return;
-    }
-    sendError(res, 500, 'Failed to update comment', []);
+    next(error);
   }
 }
 
-export async function deleteComment(req: Request, res: Response): Promise<void> {
+export async function deleteComment(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     if (!req.user) {
       sendError(res, 401, 'Authentication required', []);
@@ -109,10 +112,6 @@ export async function deleteComment(req: Request, res: Response): Promise<void> 
 
     res.status(204).end();
   } catch (error) {
-    if (error instanceof CommentsError) {
-      sendError(res, error.statusCode, error.message, []);
-      return;
-    }
-    sendError(res, 500, 'Failed to delete comment', []);
+    next(error);
   }
 }

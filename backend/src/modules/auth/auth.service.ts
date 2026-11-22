@@ -1,5 +1,6 @@
 import argon2 from "argon2";
 import { prisma } from "../../config/prisma.js";
+import { AppError } from "../../utils/errors.js";
 import {
   generateRefreshToken,
   hashRefreshToken,
@@ -9,12 +10,12 @@ import {
 } from "../../config/auth.js";
 import type { RegisterInput, LoginInput } from "./auth.validation.js";
 
-export class AuthError extends Error {
+export class AuthError extends AppError {
   constructor(
-    public statusCode: number,
+    statusCode: number,
     message: string,
   ) {
-    super(message);
+    super(statusCode, message);
     this.name = "AuthError";
   }
 }
@@ -215,44 +216,42 @@ export async function logout(
 ): Promise<void> {
   let sessionRevoked = false;
 
-  // 1. If refresh token is present, attempt to revoke its session
+  // 1. If refresh token is present, attempt to revoke its session in database
   if (rawRefreshToken && typeof rawRefreshToken === "string") {
+    const tokenHash = hashRefreshToken(rawRefreshToken);
+    const updateResult = await prisma.session.updateMany({
+      where: {
+        tokenHash,
+        revokedAt: null,
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+    if (updateResult.count > 0) {
+      sessionRevoked = true;
+    }
+  }
+
+  // 2. Stale/Invalid refresh cookie fallback: inspect access token
+  if (!sessionRevoked && rawAccessToken && typeof rawAccessToken === "string") {
+    let payload: { sub: string; sid: string } | null = null;
     try {
-      const tokenHash = hashRefreshToken(rawRefreshToken);
-      const updateResult = await prisma.session.updateMany({
+      payload = await verifyAccessToken(rawAccessToken);
+    } catch {
+      // Access token was invalid/expired; ignore token verification failure
+    }
+
+    if (payload && payload.sid) {
+      await prisma.session.updateMany({
         where: {
-          tokenHash,
+          id: payload.sid,
           revokedAt: null,
         },
         data: {
           revokedAt: new Date(),
         },
       });
-      if (updateResult.count > 0) {
-        sessionRevoked = true;
-      }
-    } catch {
-      // Continue to access token fallback
-    }
-  }
-
-  // 2. Stale/Invalid refresh cookie fallback: inspect access token
-  if (!sessionRevoked && rawAccessToken && typeof rawAccessToken === "string") {
-    try {
-      const payload = await verifyAccessToken(rawAccessToken);
-      if (payload && payload.sid) {
-        await prisma.session.updateMany({
-          where: {
-            id: payload.sid,
-            revokedAt: null,
-          },
-          data: {
-            revokedAt: new Date(),
-          },
-        });
-      }
-    } catch {
-      // Access token was also expired or invalid; logout remains idempotent
     }
   }
 }

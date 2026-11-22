@@ -1,14 +1,13 @@
 import multer from 'multer';
 import { Request, Response, NextFunction } from 'express';
+import { AppError } from '../utils/errors.js';
 import { sendError } from '../utils/api-response.js';
 
-export class UnsupportedMediaError extends Error {
-  public readonly statusCode = 415;
-
+export class UnsupportedMediaError extends AppError {
   constructor(
     message: string = 'Invalid or unsupported image format. Allowed formats: JPEG, PNG, WebP'
   ) {
-    super(message);
+    super(415, message);
     this.name = 'UnsupportedMediaError';
   }
 }

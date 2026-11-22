@@ -1,11 +1,12 @@
 import { prisma } from '../../config/prisma.js';
+import { AppError } from '../../utils/errors.js';
 
-export class VotesError extends Error {
+export class VotesError extends AppError {
   constructor(
-    public statusCode: number,
+    statusCode: number,
     message: string
   ) {
-    super(message);
+    super(statusCode, message);
     this.name = 'VotesError';
   }
 }

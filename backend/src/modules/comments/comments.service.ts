@@ -1,15 +1,16 @@
 import { prisma } from '../../config/prisma.js';
+import { AppError } from '../../utils/errors.js';
 import type {
   CreateCommentInput,
   EditCommentInput,
 } from './comments.validation.js';
 
-export class CommentsError extends Error {
+export class CommentsError extends AppError {
   constructor(
-    public statusCode: number,
+    statusCode: number,
     message: string
   ) {
-    super(message);
+    super(statusCode, message);
     this.name = 'CommentsError';
   }
 }

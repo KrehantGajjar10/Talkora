@@ -20,6 +20,7 @@ import {
 import api from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/context/auth-context";
 
 // Strictly matching backend registerSchema: { email, username, password, displayName }
 const registerSchema = z.object({
@@ -54,6 +55,7 @@ type RegisterFormData = z.infer<typeof registerSchema>;
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { checkAuth } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -77,12 +79,13 @@ export default function RegisterPage() {
       });
 
       const user = response.data?.data?.user;
+      await checkAuth();
       toast.success(
         user?.displayName
           ? `Welcome to Talkora, ${user.displayName}`
           : "Account created successfully"
       );
-      router.push("/");
+      router.push("/feed");
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { message?: string } } };
       const message =

@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "next-themes";
 import { SmoothScroll } from "@/components/smooth-scroll";
+import { AuthProvider } from "@/context/auth-context";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -23,8 +24,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
       <QueryClientProvider client={queryClient}>
-        <SmoothScroll>{children}</SmoothScroll>
-        <Toaster position="top-right" richColors />
+        <AuthProvider>
+          <SmoothScroll>{children}</SmoothScroll>
+          <Toaster position="top-right" richColors />
+        </AuthProvider>
       </QueryClientProvider>
     </ThemeProvider>
   );

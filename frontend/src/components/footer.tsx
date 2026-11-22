@@ -1,20 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import { MessageSquare, Heart, Shield, FileText, Globe } from "lucide-react";
+import { MessageSquare, Globe, ExternalLink, ArrowRight } from "lucide-react";
+import { useAuth } from "@/context/auth-context";
 
 export function Footer() {
+  const { isAuthenticated } = useAuth();
+
+  const getCommunityLink = (topic: string, isRegister = false) => {
+    if (isAuthenticated) {
+      return "/feed";
+    }
+    return isRegister ? "/register" : "/login";
+  };
+
   return (
     <footer className="border-t border-border bg-card text-muted-foreground text-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14 lg:py-16">
         <div className="grid grid-cols-2 md:grid-cols-5 gap-8 lg:gap-12">
           {/* Brand Info */}
           <div className="col-span-2 space-y-4">
-            <Link href="/" className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center text-white shadow-xs">
+            <Link href="/" className="flex items-center gap-2.5 group focus-visible:outline-hidden">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center text-white shadow-xs group-hover:scale-105 transition-transform">
                 <MessageSquare className="w-4 h-4 fill-current" />
               </div>
-              <span className="font-serif text-xl font-black tracking-tight text-foreground">
+              <span className="font-serif text-xl font-black tracking-tight text-foreground group-hover:text-primary transition-colors">
                 Talkora
               </span>
             </Link>
@@ -27,34 +37,49 @@ export function Footer() {
             </div>
           </div>
 
-          {/* Communities Column */}
+          {/* Communities Column (Redirects to Login / Sign In) */}
           <div className="space-y-3">
             <h5 className="font-serif font-bold text-xs uppercase tracking-wider text-foreground">
               Communities
             </h5>
             <ul className="space-y-2 text-xs">
               <li>
-                <Link href="#communities" className="hover:text-foreground transition-colors">
+                <Link
+                  href={getCommunityLink("technology", false)}
+                  className="hover:text-primary transition-colors block py-0.5"
+                >
                   t/technology
                 </Link>
               </li>
               <li>
-                <Link href="#communities" className="hover:text-foreground transition-colors">
+                <Link
+                  href={getCommunityLink("asktalkora", true)}
+                  className="hover:text-primary transition-colors block py-0.5"
+                >
                   t/asktalkora
                 </Link>
               </li>
               <li>
-                <Link href="#communities" className="hover:text-foreground transition-colors">
+                <Link
+                  href={getCommunityLink("designcraft", false)}
+                  className="hover:text-primary transition-colors block py-0.5"
+                >
                   t/designcraft
                 </Link>
               </li>
               <li>
-                <Link href="#communities" className="hover:text-foreground transition-colors">
+                <Link
+                  href={getCommunityLink("science", true)}
+                  className="hover:text-primary transition-colors block py-0.5"
+                >
                   t/science
                 </Link>
               </li>
               <li>
-                <Link href="#communities" className="hover:text-foreground transition-colors">
+                <Link
+                  href={getCommunityLink("bookclub", false)}
+                  className="hover:text-primary transition-colors block py-0.5"
+                >
                   t/bookclub
                 </Link>
               </li>
@@ -68,19 +93,19 @@ export function Footer() {
             </h5>
             <ul className="space-y-2 text-xs">
               <li>
-                <Link href="#about" className="hover:text-foreground transition-colors">
+                <Link href="/#about" className="hover:text-foreground hover:text-primary transition-colors block py-0.5">
                   About Talkora
                 </Link>
               </li>
               <li>
-                <span className="hover:text-foreground transition-colors cursor-pointer">
+                <Link href="/careers" className="hover:text-foreground hover:text-primary transition-colors block py-0.5">
                   Community Careers
-                </span>
+                </Link>
               </li>
               <li>
-                <span className="hover:text-foreground transition-colors cursor-pointer">
+                <Link href="/brand" className="hover:text-foreground hover:text-primary transition-colors block py-0.5">
                   Brand Guidelines
-                </span>
+                </Link>
               </li>
             </ul>
           </div>
@@ -92,29 +117,44 @@ export function Footer() {
             </h5>
             <ul className="space-y-2 text-xs">
               <li>
-                <span className="hover:text-foreground transition-colors cursor-pointer font-medium text-foreground/90">
+                <Link
+                  href="/privacy"
+                  className="hover:text-foreground hover:text-primary transition-colors block py-0.5 font-medium text-foreground/90"
+                >
                   Privacy Policy
-                </span>
+                </Link>
               </li>
               <li>
-                <span className="hover:text-foreground transition-colors cursor-pointer">
+                <Link
+                  href="/terms"
+                  className="hover:text-foreground hover:text-primary transition-colors block py-0.5"
+                >
                   Terms of Service
-                </span>
+                </Link>
               </li>
               <li>
-                <span className="hover:text-foreground transition-colors cursor-pointer">
+                <Link
+                  href="/rules"
+                  className="hover:text-foreground hover:text-primary transition-colors block py-0.5"
+                >
                   Content Policy
-                </span>
+                </Link>
               </li>
               <li>
-                <span className="hover:text-foreground transition-colors cursor-pointer">
+                <Link
+                  href="/rules#moderator-code"
+                  className="hover:text-foreground hover:text-primary transition-colors block py-0.5"
+                >
                   Moderator Code of Conduct
-                </span>
+                </Link>
               </li>
               <li>
-                <span className="hover:text-foreground transition-colors cursor-pointer">
+                <Link
+                  href="/privacy#cookies"
+                  className="hover:text-foreground hover:text-primary transition-colors block py-0.5"
+                >
                   Cookie Preferences
-                </span>
+                </Link>
               </li>
             </ul>
           </div>
@@ -126,17 +166,17 @@ export function Footer() {
             © 2026 Talkora, Inc. All rights reserved.
           </div>
           <div className="flex items-center gap-6">
-            <span className="hover:text-foreground cursor-pointer transition-colors">
+            <Link href="/privacy" className="hover:text-foreground transition-colors">
               Privacy Policy
-            </span>
+            </Link>
             <span>•</span>
-            <span className="hover:text-foreground cursor-pointer transition-colors">
+            <Link href="/terms" className="hover:text-foreground transition-colors">
               Terms of Use
-            </span>
+            </Link>
             <span>•</span>
-            <span className="hover:text-foreground cursor-pointer transition-colors">
+            <Link href="/terms#security" className="hover:text-foreground transition-colors">
               Security Disclosures
-            </span>
+            </Link>
           </div>
         </div>
       </div>

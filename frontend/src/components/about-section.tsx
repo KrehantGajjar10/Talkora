@@ -9,7 +9,6 @@ import {
   Sparkles,
   ArrowRight,
 } from "lucide-react";
-import { buttonVariants } from "@/components/ui/button";
 
 const pillars = [
   {
@@ -94,14 +93,10 @@ export function AboutSection() {
           <div className="flex flex-col sm:flex-row items-center gap-3 shrink-0">
             <Link
               href="/register"
-              className={buttonVariants({
-                size: "lg",
-                className:
-                  "bg-white text-orange-600 hover:bg-orange-50 font-bold px-8 h-12 rounded-full taste-button shadow-md",
-              })}
+              className="inline-flex items-center justify-center gap-2 bg-white text-orange-600 hover:text-orange-700 hover:bg-orange-50 font-bold px-8 h-12 rounded-full shadow-lg shadow-black/10 transition-all duration-200 taste-button hover:scale-[1.02] active:scale-[0.98] text-sm sm:text-base cursor-pointer"
             >
-              Get Started Now
-              <ArrowRight className="w-4 h-4 ml-2" />
+              <span className="text-orange-600 font-bold">Get Started Now</span>
+              <ArrowRight className="w-4 h-4 text-orange-600 shrink-0" />
             </Link>
           </div>
         </div>

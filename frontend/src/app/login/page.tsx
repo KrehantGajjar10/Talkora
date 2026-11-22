@@ -21,6 +21,7 @@ import {
 import api from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/context/auth-context";
 
 // Strictly matching backend loginSchema: { identifier, password }
 const loginSchema = z.object({
@@ -32,6 +33,7 @@ type LoginFormData = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
   const router = useRouter();
+  const { checkAuth } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -53,10 +55,11 @@ export default function LoginPage() {
       });
 
       const user = response.data?.data?.user;
+      await checkAuth();
       toast.success(
         user?.displayName ? `Welcome back, ${user.displayName}` : "Logged in successfully"
       );
-      router.push("/");
+      router.push("/feed");
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { message?: string } } };
       const message =

@@ -42,7 +42,7 @@ const mockPosts: PostItem[] = [
     content: "We benchmarked pooled vs unpooled queries under 1,000 requests/sec. By offloading session handling to serverless proxies and reducing TCP handshake overhead, p99 latency dropped from 420ms to 24ms. Here is our architectural diagram and query execution plan.",
     imageUrl: "https://images.unsplash.com/photo-1544197150-b99a580bb7a8?auto=format&fit=crop&w=1200&q=80",
     imageCaption: "Network routing topology benchmark",
-    initialVotes: 894,
+    initialVotes: 0,
     commentsCount: 142,
   },
   {
@@ -52,7 +52,7 @@ const mockPosts: PostItem[] = [
     timeAgo: "6h ago",
     title: "What is an anti-pattern in modern web design that developers love but users quietly hate?",
     content: "For me, it is infinite scroll without URL preservation. You scroll down 40 items, click on a detail page, press Back, and get thrown right back to the top of the feed. What design trend do you wish died yesterday?",
-    initialVotes: 1205,
+    initialVotes: 0,
     commentsCount: 388,
   },
   {
@@ -64,7 +64,7 @@ const mockPosts: PostItem[] = [
     content: "We removed all pastel gradient borders, curved bubbles, and distracting floating reaction pills. Instead, we prioritized 65-character line lengths, 1.6 line height, and pure typographic hierarchy. Readers spend 40% more time on long-form articles.",
     imageUrl: "https://images.unsplash.com/photo-1499750310107-5fef28a66643?auto=format&fit=crop&w=1200&q=80",
     imageCaption: "Minimalist reading workbench",
-    initialVotes: 642,
+    initialVotes: 0,
     commentsCount: 78,
   },
 ];
@@ -72,38 +72,30 @@ const mockPosts: PostItem[] = [
 export function FeedPreview() {
   const [activeTab, setActiveTab] = useState<"hot" | "new" | "top" | "rising">("hot");
   const [votesState, setVotesState] = useState<Record<string, { count: number; vote: "up" | "down" | null }>>({
-    p1: { count: 894, vote: null },
-    p2: { count: 1205, vote: null },
-    p3: { count: 642, vote: null },
+    p1: { count: 0, vote: null },
+    p2: { count: 0, vote: null },
+    p3: { count: 0, vote: null },
   });
 
   const handleVote = (postId: string, type: "up" | "down") => {
     const current = votesState[postId] || { count: 0, vote: null };
-    if (current.vote === type) {
-      setVotesState((prev) => ({
-        ...prev,
-        [postId]: {
-          count: type === "up" ? current.count - 1 : current.count + 1,
-          vote: null,
-        },
-      }));
-    } else {
-      const diff =
-        current.vote === null
-          ? type === "up"
-            ? 1
-            : -1
-          : type === "up"
-          ? 2
-          : -2;
-      setVotesState((prev) => ({
-        ...prev,
-        [postId]: {
-          count: current.count + diff,
-          vote: type,
-        },
-      }));
+    const isDownDisabled = current.count <= 0 && current.vote !== "down";
+    if (type === "down" && isDownDisabled) {
+      return;
     }
+    const newVote = current.vote === type ? null : type;
+    const baseCount = 0;
+    const newCount = Math.max(
+      0,
+      baseCount + (newVote === "up" ? 1 : newVote === "down" ? -1 : 0)
+    );
+    setVotesState((prev) => ({
+      ...prev,
+      [postId]: {
+        count: newCount,
+        vote: newVote,
+      },
+    }));
   };
 
   return (
@@ -191,7 +183,9 @@ export function FeedPreview() {
                         </button>
                         <span
                           className={`text-xs font-bold tabular-nums ${
-                            currentVote === "up"
+                            currentCount === 0
+                              ? "text-foreground"
+                              : currentVote === "up"
                               ? "text-primary"
                               : currentVote === "down"
                               ? "text-blue-600"
@@ -201,9 +195,12 @@ export function FeedPreview() {
                           {currentCount}
                         </span>
                         <button
+                          disabled={currentCount <= 0 && currentVote !== "down"}
                           onClick={() => handleVote(post.id, "down")}
                           className={`p-1 rounded-md transition-colors ${
-                            currentVote === "down"
+                            currentCount <= 0 && currentVote !== "down"
+                              ? "text-muted-foreground/30 cursor-not-allowed opacity-40 hover:bg-transparent"
+                              : currentVote === "down"
                               ? "text-blue-600 bg-blue-100"
                               : "text-muted-foreground hover:text-blue-600 hover:bg-secondary"
                           }`}

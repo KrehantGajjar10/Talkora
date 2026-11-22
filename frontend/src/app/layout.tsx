@@ -31,9 +31,9 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${merriweather.variable} ${openSans.variable} h-full antialiased`}
+      className={`${merriweather.variable} ${openSans.variable} antialiased`}
     >
-      <body className="min-h-full flex flex-col font-sans bg-background text-foreground selection:bg-orange-100 selection:text-orange-900">
+      <body className="min-h-screen flex flex-col font-sans bg-background text-foreground selection:bg-orange-100 selection:text-orange-900">
         <Providers>{children}</Providers>
       </body>
     </html>

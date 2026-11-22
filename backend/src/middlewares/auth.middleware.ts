@@ -54,3 +54,52 @@ export const authenticate = async (
     sendError(res, 401, 'Authentication required', []);
   }
 };
+
+export const optionalAuthenticate = async (
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const token = req.cookies?.[ACCESS_COOKIE_NAME];
+    if (!token || typeof token !== 'string') {
+      return next();
+    }
+
+    let payload: { sub: string; sid: string };
+    try {
+      payload = await verifyAccessToken(token);
+    } catch {
+      return next();
+    }
+
+    const session = await prisma.session.findUnique({
+      where: { id: payload.sid },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            username: true,
+          },
+        },
+      },
+    });
+
+    if (
+      !session ||
+      session.userId !== payload.sub ||
+      session.revokedAt !== null ||
+      session.expiresAt <= new Date()
+    ) {
+      return next();
+    }
+
+    req.user = session.user;
+    req.sessionId = session.id;
+
+    next();
+  } catch {
+    next();
+  }
+};

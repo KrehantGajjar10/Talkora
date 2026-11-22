@@ -22,6 +22,13 @@ export interface SafeAuthor {
   avatarUrl: string | null;
 }
 
+export interface PostVoteStats {
+  upvotes: number;
+  downvotes: number;
+  score: number;
+  userVote: 'UPVOTE' | 'DOWNVOTE' | null;
+}
+
 export interface SafePost {
   id: string;
   title: string;
@@ -29,6 +36,10 @@ export interface SafePost {
   imageUrl: string | null;
   author: SafeAuthor;
   commentCount: number;
+  upvotes: number;
+  downvotes: number;
+  score: number;
+  userVote: 'UPVOTE' | 'DOWNVOTE' | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -67,16 +78,58 @@ export const postSelect = {
   },
 } as const;
 
-export function formatSafePost(post: {
-  id: string;
-  title: string;
-  content: string | null;
-  imageUrl: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  author: SafeAuthor;
-  _count: { comments: number };
-}): SafePost {
+export async function getPostVoteStats(
+  postId: string,
+  userId?: string
+): Promise<PostVoteStats> {
+  const [voteCounts, userVoteRecord] = await Promise.all([
+    prisma.vote.groupBy({
+      by: ['type'],
+      where: { postId },
+      _count: { _all: true },
+    }),
+    userId
+      ? prisma.vote.findUnique({
+          where: { userId_postId: { userId, postId } },
+          select: { type: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  let upvotes = 0;
+  let downvotes = 0;
+  for (const vc of voteCounts) {
+    if (vc.type === 'UPVOTE') upvotes = vc._count._all;
+    if (vc.type === 'DOWNVOTE') downvotes = vc._count._all;
+  }
+  const score = upvotes - downvotes;
+
+  return {
+    upvotes,
+    downvotes,
+    score,
+    userVote: userVoteRecord?.type ?? null,
+  };
+}
+
+export function formatSafePost(
+  post: {
+    id: string;
+    title: string;
+    content: string | null;
+    imageUrl: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    author: SafeAuthor;
+    _count: { comments: number };
+  },
+  voteStats: PostVoteStats = {
+    upvotes: 0,
+    downvotes: 0,
+    score: 0,
+    userVote: null,
+  }
+): SafePost {
   return {
     id: post.id,
     title: post.title,
@@ -84,6 +137,10 @@ export function formatSafePost(post: {
     imageUrl: post.imageUrl,
     author: post.author,
     commentCount: post._count.comments,
+    upvotes: voteStats.upvotes,
+    downvotes: voteStats.downvotes,
+    score: voteStats.score,
+    userVote: voteStats.userVote,
     createdAt: post.createdAt,
     updatedAt: post.updatedAt,
   };
@@ -131,7 +188,8 @@ export async function createPost(
 
 export async function getPublicFeed(
   page: number,
-  limit: number
+  limit: number,
+  currentUserId?: string
 ): Promise<PaginatedPosts> {
   const skip = (page - 1) * limit;
   const take = limit;
@@ -146,12 +204,64 @@ export async function getPublicFeed(
     prisma.post.count(),
   ]);
 
+  const postIds = posts.map((p) => p.id);
+
+  // Batch query: Aggregate vote counts for all posts in page in a single query
+  const voteCounts =
+    postIds.length > 0
+      ? await prisma.vote.groupBy({
+          by: ['postId', 'type'],
+          where: { postId: { in: postIds } },
+          _count: { _all: true },
+        })
+      : [];
+
+  const voteStatsMap = new Map<string, { upvotes: number; downvotes: number }>();
+  for (const id of postIds) {
+    voteStatsMap.set(id, { upvotes: 0, downvotes: 0 });
+  }
+  for (const vc of voteCounts) {
+    const stats = voteStatsMap.get(vc.postId);
+    if (stats) {
+      if (vc.type === 'UPVOTE') stats.upvotes = vc._count._all;
+      if (vc.type === 'DOWNVOTE') stats.downvotes = vc._count._all;
+    }
+  }
+
+  // Batch query: User votes for posts in page in a single query if authenticated
+  const userVoteMap = new Map<string, 'UPVOTE' | 'DOWNVOTE'>();
+  if (currentUserId && postIds.length > 0) {
+    const userVotes = await prisma.vote.findMany({
+      where: {
+        userId: currentUserId,
+        postId: { in: postIds },
+      },
+      select: { postId: true, type: true },
+    });
+    for (const uv of userVotes) {
+      userVoteMap.set(uv.postId, uv.type);
+    }
+  }
+
+  const formattedPosts: SafePost[] = posts.map((post) => {
+    const stats = voteStatsMap.get(post.id) || { upvotes: 0, downvotes: 0 };
+    const score = stats.upvotes - stats.downvotes;
+    const userVote = userVoteMap.get(post.id) ?? null;
+
+    return formatSafePost(post, {
+      upvotes: stats.upvotes,
+      downvotes: stats.downvotes,
+      score,
+      userVote,
+    });
+  });
+
   const totalPages = Math.ceil(totalPosts / limit) || 1;
   const hasNextPage = page < totalPages;
   const hasPreviousPage = page > 1;
 
   return {
-    posts: posts.map(formatSafePost),
+    posts: formattedPosts,
     pagination: {
       page,
       limit,
@@ -163,17 +273,23 @@ export async function getPublicFeed(
   };
 }
 
-export async function getPostById(postId: string): Promise<SafePost> {
-  const post = await prisma.post.findUnique({
-    where: { id: postId },
-    select: postSelect,
-  });
+export async function getPostById(
+  postId: string,
+  currentUserId?: string
+): Promise<SafePost> {
+  const [post, voteStats] = await Promise.all([
+    prisma.post.findUnique({
+      where: { id: postId },
+      select: postSelect,
+    }),
+    getPostVoteStats(postId, currentUserId),
+  ]);
 
   if (!post) {
     throw new PostsError(404, 'Post not found');
   }
 
-  return formatSafePost(post);
+  return formatSafePost(post, voteStats);
 }
 
 export async function editPostText(
@@ -215,13 +331,16 @@ export async function editPostText(
   if (input.title !== undefined) updateData.title = input.title;
   if (input.content !== undefined) updateData.content = input.content;
 
-  const updated = await prisma.post.update({
-    where: { id: postId },
-    data: updateData,
-    select: postSelect,
-  });
+  const [updated, voteStats] = await Promise.all([
+    prisma.post.update({
+      where: { id: postId },
+      data: updateData,
+      select: postSelect,
+    }),
+    getPostVoteStats(postId, userId),
+  ]);
 
-  return formatSafePost(updated);
+  return formatSafePost(updated, voteStats);
 }
 
 export async function replacePostImage(
@@ -249,20 +368,23 @@ export async function replacePostImage(
   const newImage = await uploadImageStream(file.buffer);
 
   try {
-    const updated = await prisma.post.update({
-      where: { id: postId },
-      data: {
-        imageUrl: newImage.secureUrl,
-        imagePublicId: newImage.publicId,
-      },
-      select: postSelect,
-    });
+    const [updated, voteStats] = await Promise.all([
+      prisma.post.update({
+        where: { id: postId },
+        data: {
+          imageUrl: newImage.secureUrl,
+          imagePublicId: newImage.publicId,
+        },
+        select: postSelect,
+      }),
+      getPostVoteStats(postId, userId),
+    ]);
 
     if (existing.imagePublicId) {
       void deleteImage(existing.imagePublicId);
     }
 
-    return formatSafePost(updated);
+    return formatSafePost(updated, voteStats);
   } catch (error) {
     void deleteImage(newImage.publicId);
     throw error;
@@ -298,20 +420,23 @@ export async function removePostImage(
     );
   }
 
-  const updated = await prisma.post.update({
-    where: { id: postId },
-    data: {
-      imageUrl: null,
-      imagePublicId: null,
-    },
-    select: postSelect,
-  });
+  const [updated, voteStats] = await Promise.all([
+    prisma.post.update({
+      where: { id: postId },
+      data: {
+        imageUrl: null,
+        imagePublicId: null,
+      },
+      select: postSelect,
+    }),
+    getPostVoteStats(postId, userId),
+  ]);
 
   if (existing.imagePublicId) {
     void deleteImage(existing.imagePublicId);
   }
 
-  return formatSafePost(updated);
+  return formatSafePost(updated, voteStats);
 }
 
 export async function deletePost(
@@ -332,7 +457,7 @@ export async function deletePost(
   }
 
   if (existing.authorId !== userId) {
-    throw new PostsError(403, 'Forbidden: You can only delete your own posts');
+    throw new PostsError(403, 'Forbidden: You can only edit your own posts');
   }
 
   await prisma.post.delete({

@@ -44,7 +44,7 @@ export async function getPublicFeed(
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 10;
 
-    const result = await postsService.getPublicFeed(page, limit);
+    const result = await postsService.getPublicFeed(page, limit, req.user?.id);
     sendSuccess(res, 200, 'Feed retrieved successfully', result);
   } catch (error) {
     if (error instanceof PostsError) {
@@ -63,7 +63,7 @@ export async function getPostById(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const post = await postsService.getPostById(postId);
+    const post = await postsService.getPostById(postId, req.user?.id);
     sendSuccess(res, 200, 'Post retrieved successfully', { post });
   } catch (error) {
     if (error instanceof PostsError) {
@@ -150,7 +150,7 @@ export async function modifyPostImage(
     sendError(
       res,
       400,
-      'Invalid request format. Expected multipart/form-data with image or JSON with { remove: true }',
+      'Invalid request: must be multipart/form-data with image or application/json with { remove: true }',
       []
     );
   } catch (error) {
@@ -176,8 +176,7 @@ export async function deletePost(req: Request, res: Response): Promise<void> {
     }
 
     await postsService.deletePost(postId, req.user.id);
-
-    res.status(204).end();
+    res.status(204).send();
   } catch (error) {
     if (error instanceof PostsError) {
       sendError(res, error.statusCode, error.message, []);

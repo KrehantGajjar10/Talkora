@@ -7,6 +7,7 @@ import authRoutes from './modules/auth/auth.routes.js';
 import usersRoutes from './modules/users/users.routes.js';
 import postsRoutes from './modules/posts/posts.routes.js';
 import commentsRoutes from './modules/comments/comments.routes.js';
+import votesRoutes from './modules/votes/votes.routes.js';
 import { sendError } from './utils/api-response.js';
 
 const app: Application = express();
@@ -31,6 +32,7 @@ app.use(cookieParser());
 app.use('/api', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', usersRoutes);
+app.use('/api', votesRoutes);
 app.use('/api', commentsRoutes);
 app.use('/api/posts', postsRoutes);
 

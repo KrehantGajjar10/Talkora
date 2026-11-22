@@ -1,14 +1,14 @@
 import { Router } from 'express';
 import * as postsController from './posts.controller.js';
-import { authenticate } from '../../middlewares/auth.middleware.js';
+import {
+  authenticate,
+  optionalAuthenticate,
+} from '../../middlewares/auth.middleware.js';
 import {
   validateBody,
   validateQuery,
 } from '../../middlewares/validate.middleware.js';
-import {
-  uploadOptionalImage,
-  uploadSingleImage,
-} from '../../middlewares/upload.middleware.js';
+import { uploadOptionalImage } from '../../middlewares/upload.middleware.js';
 import {
   createPostSchema,
   editPostTextSchema,
@@ -17,9 +17,10 @@ import {
 
 const router = Router();
 
-// GET /api/posts (Public Feed)
+// GET /api/posts (Public Feed, optional auth for userVote)
 router.get(
   '/',
+  optionalAuthenticate,
   validateQuery(feedQuerySchema),
   postsController.getPublicFeed
 );
@@ -33,9 +34,10 @@ router.post(
   postsController.createPost
 );
 
-// GET /api/posts/:postId (Get Post Details)
+// GET /api/posts/:postId (Get Post Details, optional auth for userVote)
 router.get(
   '/:postId',
+  optionalAuthenticate,
   postsController.getPostById
 );
 

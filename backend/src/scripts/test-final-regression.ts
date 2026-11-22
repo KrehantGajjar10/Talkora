@@ -1,8 +1,6 @@
 import 'dotenv/config';
 import http from 'node:http';
-import app from '../app.js';
-import { prisma } from '../config/prisma.js';
-import { ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME } from '../config/auth.js';
+import crypto from 'node:crypto';
 
 const PORT = 5066;
 const BASE_URL = `http://localhost:${PORT}/api`;
@@ -89,42 +87,113 @@ let server: http.Server;
 
 async function runRegressionSuite() {
   console.log(`=======================================================`);
-  console.log(`Starting Talkora Chapter 11.1 Final Regression Suite`);
+  console.log(`Starting Talkora Chapter 11.2 Final Regression Suite`);
   console.log(`Server port: ${PORT}`);
   console.log(`=======================================================\n`);
 
-  // ==========================================
-  // DATABASE SAFETY GATE
-  // ==========================================
+  // =========================================================================
+  // STRICT DATABASE SAFETY GATE & ISOLATED TEST ENVIRONMENT CONFIGURATION
+  // =========================================================================
+
+  // 1. Explicit execution approval gate
   if (process.env.ALLOW_TEST_EXECUTION !== 'true') {
     console.error(
-      '❌ Safety Gate Abort: Regression tests require ALLOW_TEST_EXECUTION=true to run.'
+      '❌ Safety Gate Abort: Regression tests require explicit ALLOW_TEST_EXECUTION=true to run.'
     );
     process.exit(1);
   }
 
-  if (
-    process.env.NODE_ENV === 'production' ||
-    process.env.DATABASE_URL?.toLowerCase().includes('production')
-  ) {
+  // 2. Strict dedicated TEST_DATABASE_URL requirement (never fall back to application DATABASE_URL)
+  const testDbUrl = process.env.TEST_DATABASE_URL?.trim();
+  if (!testDbUrl) {
     console.error(
-      '❌ Safety Gate Abort: Regression tests are forbidden against production databases!'
+      '❌ Safety Gate Abort: TEST_DATABASE_URL is required. The regression test runner will NEVER fall back to DATABASE_URL.'
     );
     process.exit(1);
   }
 
-  // Active database connection verification
-  try {
-    const dbCheck = await prisma.$queryRaw<Array<{ db: string }>>`SELECT current_database()::text as db`;
-    const currentDb = dbCheck[0]?.db || 'unknown';
-    console.log(`[Safety Gate Passed] Connected to test database: ${currentDb}`);
-  } catch (dbErr) {
-    console.error('❌ Safety Gate Abort: Could not connect to database:', dbErr);
+  const appDbUrl = process.env.DATABASE_URL?.trim();
+  if (appDbUrl && testDbUrl === appDbUrl && process.env.ALLOW_SHARED_TEST_DB !== 'true') {
+    console.error(
+      '❌ Safety Gate Abort: TEST_DATABASE_URL is identical to application DATABASE_URL. A dedicated test database or isolated branch is strictly required to protect application/production data.'
+    );
     process.exit(1);
   }
 
-  // Disable rate limiting for the automated test suite execution
-  process.env.DISABLE_RATE_LIMIT = 'true';
+  // 3. Parse and verify database connection endpoint identity
+  let parsedHost: string;
+  let parsedDbName: string;
+  try {
+    const parsed = new URL(testDbUrl);
+    parsedHost = parsed.hostname.toLowerCase();
+    parsedDbName = parsed.pathname.replace(/^\//, '').toLowerCase();
+  } catch {
+    console.error('❌ Safety Gate Abort: TEST_DATABASE_URL is not a valid connection URL format.');
+    process.exit(1);
+  }
+
+  // 4. Expected test host/endpoint identity verification (e.g. Neon branch endpoint ID)
+  const expectedHost = process.env.EXPECTED_TEST_DB_HOST?.trim().toLowerCase();
+  if (!expectedHost) {
+    console.error(
+      '❌ Safety Gate Abort: EXPECTED_TEST_DB_HOST must be explicitly configured to verify the target test database/branch identity before execution.'
+    );
+    process.exit(1);
+  }
+
+  if (!parsedHost.includes(expectedHost)) {
+    console.error(
+      `❌ Safety Gate Abort: TEST_DATABASE_URL host "${parsedHost}" does not match configured EXPECTED_TEST_DB_HOST "${expectedHost}".`
+    );
+    process.exit(1);
+  }
+
+  // 5. Expected test database name verification (if provided)
+  const expectedDbName = process.env.EXPECTED_TEST_DB_NAME?.trim().toLowerCase();
+  if (expectedDbName && parsedDbName !== expectedDbName) {
+    console.error(
+      `❌ Safety Gate Abort: TEST_DATABASE_URL database name "${parsedDbName}" does not match configured EXPECTED_TEST_DB_NAME "${expectedDbName}".`
+    );
+    process.exit(1);
+  }
+
+  // Route runtime application to the dedicated test database in an isolated test environment
+  process.env.DATABASE_URL = testDbUrl;
+  process.env.NODE_ENV = 'test';
+  process.env.ALLOW_TEST_RATE_LIMIT_BYPASS = 'true';
+
+  // Dynamic imports: evaluate application & prisma with the verified test database connection
+  const { default: app } = await import('../app.js');
+  const { prisma } = await import('../config/prisma.js');
+  const { ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME } = await import('../config/auth.js');
+
+  // 6. Active live database identity query verification
+  try {
+    const [idResult] = await prisma.$queryRaw<
+      Array<{
+        current_db: string;
+        server_ip: string | null;
+        server_version: string;
+      }>
+    >`SELECT current_database()::text as current_db, inet_server_addr()::text as server_ip, version()::text as server_version`;
+
+    const liveDbName = idResult?.current_db?.toLowerCase() || '';
+    if (expectedDbName && liveDbName !== expectedDbName) {
+      console.error(
+        `❌ Safety Gate Abort: Active connected database "${liveDbName}" does not match expected "${expectedDbName}".`
+      );
+      process.exit(1);
+    }
+
+    console.log(`[Safety Gate Passed] Verified test database endpoint: ${parsedHost}`);
+    console.log(`[Safety Gate Passed] Connected database name: ${idResult?.current_db}`);
+    if (idResult?.server_ip) {
+      console.log(`[Safety Gate Passed] Database server IP: ${idResult.server_ip}`);
+    }
+  } catch (dbErr) {
+    console.error('❌ Safety Gate Abort: Failed to verify database identity:', dbErr);
+    process.exit(1);
+  }
 
   server = app.listen(PORT);
 
@@ -146,12 +215,13 @@ async function runRegressionSuite() {
   const trackedPostIds = new Set<string>();
   const trackedCommentIds = new Set<string>();
 
-  // Unique per-run identifiers (randomized suffix prevents race conditions or collisions)
-  const runSuffix = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  // Unique per-run identifiers using crypto.randomUUID()
+  const runUuid = crypto.randomUUID();
+  const runSuffix = runUuid.replace(/-/g, '').slice(0, 12);
   const u1Username = `t_u1_${runSuffix}`.slice(0, 30);
   const u2Username = `t_u2_${runSuffix}`.slice(0, 30);
-  const u1Email = `user1_${runSuffix}@talkora.test`;
-  const u2Email = `user2_${runSuffix}@talkora.test`;
+  const u1Email = `u1_${runSuffix}@talkora.test`;
+  const u2Email = `u2_${runSuffix}@talkora.test`;
 
   try {
     // ==========================================
@@ -366,7 +436,7 @@ async function runRegressionSuite() {
     const tCreatePost = await request('POST', '/posts', {
       cookies: u1Cookies,
       body: {
-        title: 'Chapter 11.1 Automated Test Post',
+        title: 'Chapter 11.2 Automated Test Post',
         content: 'This post is created by automated regression suite for validation.',
       },
     });
@@ -435,12 +505,12 @@ async function runRegressionSuite() {
     const tEditPostAuthor = await request('PATCH', `/posts/${postId}`, {
       cookies: u1Cookies,
       body: {
-        title: 'Chapter 11.1 Post Updated Title',
+        title: 'Chapter 11.2 Post Updated Title',
       },
     });
     assert(
       tEditPostAuthor.status === 200 &&
-        tEditPostAuthor.data.data.post.title === 'Chapter 11.1 Post Updated Title',
+        tEditPostAuthor.data.data.post.title === 'Chapter 11.2 Post Updated Title',
       '24. Post author can edit post title/content (200 OK)'
     );
 

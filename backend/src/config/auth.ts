@@ -1,15 +1,9 @@
 import crypto from 'node:crypto';
 import * as jose from 'jose';
 import type { CookieOptions } from 'express';
+import { env } from './env.js';
 
-const accessTokenSecret = process.env.ACCESS_TOKEN_SECRET;
-
-if (!accessTokenSecret || accessTokenSecret.length < 32) {
-  throw new Error(
-    'ACCESS_TOKEN_SECRET must be defined and at least 32 characters long.'
-  );
-}
-
+const accessTokenSecret = env.ACCESS_TOKEN_SECRET;
 const secretKey = new TextEncoder().encode(accessTokenSecret);
 
 export const ACCESS_TOKEN_EXPIRES_IN = '15m';
@@ -22,18 +16,11 @@ export const REFRESH_COOKIE_NAME = 'talkora_refresh';
 export const JWT_ISSUER = 'talkora-api';
 export const JWT_AUDIENCE = 'talkora-client';
 
-const rawSameSite = (process.env.COOKIE_SAME_SITE || 'lax').toLowerCase();
-export const COOKIE_SAME_SITE: 'lax' | 'strict' | 'none' =
-  rawSameSite === 'none'
-    ? 'none'
-    : rawSameSite === 'strict'
-    ? 'strict'
-    : 'lax';
-
-const isProduction = process.env.NODE_ENV === 'production';
+export const COOKIE_SAME_SITE: 'lax' | 'strict' | 'none' = env.COOKIE_SAME_SITE;
+const isProduction = env.NODE_ENV === 'production';
 export const COOKIE_SECURE: boolean = isProduction || COOKIE_SAME_SITE === 'none';
 export const COOKIE_DOMAIN: string | undefined =
-  process.env.COOKIE_DOMAIN?.trim() || undefined;
+  env.COOKIE_DOMAIN?.trim() || undefined;
 
 export function getAccessCookieOptions(): CookieOptions {
   const options: CookieOptions = {

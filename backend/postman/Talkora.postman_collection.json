@@ -474,6 +474,87 @@
           ]
         },
         {
+          "name": "Replace Post Image",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "image",
+                  "type": "file",
+                  "description": "Replacement image file (JPEG, PNG, or WebP under 5 MB)"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/posts/{{testPostId}}/image",
+              "host": ["{{baseUrl}}"],
+              "path": ["posts", "{{testPostId}}", "image"]
+            },
+            "description": "Replaces the existing post image with a new image upload via Cloudinary. Author only."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Post image updated', function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.post).to.have.property('imageUrl');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove Post Image",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"remove\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/posts/{{testPostId}}/image",
+              "host": ["{{baseUrl}}"],
+              "path": ["posts", "{{testPostId}}", "image"]
+            },
+            "description": "Removes the existing post image and cleans up the asset in Cloudinary. Author only."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Post image removed', function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.post.imageUrl).to.be.null;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
           "name": "Delete Post",
           "request": {
             "method": "DELETE",

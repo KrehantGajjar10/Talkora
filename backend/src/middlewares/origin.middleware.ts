@@ -1,7 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
+import { env } from '../config/env.js';
 import { sendError } from '../utils/api-response.js';
 
-function normalizeOrigin(url: string): string {
+export function normalizeOrigin(url: string): string {
   try {
     return new URL(url).origin.toLowerCase();
   } catch {
@@ -10,7 +11,7 @@ function normalizeOrigin(url: string): string {
 }
 
 export function getAllowedOrigins(): string[] {
-  const raw = process.env.FRONTEND_URL || 'http://localhost:3000';
+  const raw = env.FRONTEND_URL;
   return raw
     .split(',')
     .map((item) => normalizeOrigin(item))

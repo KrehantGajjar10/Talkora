@@ -1,11 +1,8 @@
 import { PrismaClient } from '../generated/prisma/client.js';
 import { PrismaNeon } from '@prisma/adapter-neon';
+import { env } from './env.js';
 
-const databaseUrl = process.env.DATABASE_URL;
-
-if (!databaseUrl) {
-  throw new Error('DATABASE_URL environment variable is missing.');
-}
+const databaseUrl = env.DATABASE_URL;
 
 const adapter = new PrismaNeon({
   connectionString: databaseUrl,
@@ -17,7 +14,7 @@ const globalForPrisma = globalThis as unknown as {
 
 export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter });
 
-if (process.env.NODE_ENV !== 'production') {
+if (env.NODE_ENV !== 'production') {
   globalForPrisma.prisma = prisma;
 }
 

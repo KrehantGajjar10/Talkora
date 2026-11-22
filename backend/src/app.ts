@@ -10,7 +10,7 @@ import postsRoutes from './modules/posts/posts.routes.js';
 import commentsRoutes from './modules/comments/comments.routes.js';
 import votesRoutes from './modules/votes/votes.routes.js';
 import docsRoutes from './docs/openapi.js';
-import { validateOrigin } from './middlewares/origin.middleware.js';
+import { validateOrigin, getAllowedOrigins, normalizeOrigin } from './middlewares/origin.middleware.js';
 import { mutationRateLimiter, authRateLimiter } from './middlewares/rate-limiter.middleware.js';
 import { errorHandler } from './middlewares/error.middleware.js';
 import { sendError } from './utils/api-response.js';
@@ -37,15 +37,17 @@ app.use(
 );
 
 // Cross-Origin Resource Sharing with credentials
-const allowedOrigins = env.FRONTEND_URL
-  .split(',')
-  .map((url) => url.trim().replace(/\/+$/, ''))
-  .filter(Boolean);
+const allowedOrigins = getAllowedOrigins();
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin.replace(/\/+$/, ''))) {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      const normalized = normalizeOrigin(origin);
+      if (allowedOrigins.includes(normalized)) {
         callback(null, true);
       } else {
         callback(null, false);

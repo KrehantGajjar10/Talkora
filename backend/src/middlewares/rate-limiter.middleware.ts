@@ -1,11 +1,17 @@
 import rateLimit from 'express-rate-limit';
 import { Request, Response } from 'express';
+import { env } from '../config/env.js';
 import { sendError } from '../utils/api-response.js';
 
 export const isRateLimitDisabled = (): boolean => {
+  // CRITICAL: Production MUST ALWAYS enforce rate limits regardless of any environment variables.
+  if (env.NODE_ENV === 'production' || process.env.NODE_ENV === 'production') {
+    return false;
+  }
+  // Rate-limit bypass is strictly permitted ONLY in an explicitly isolated test environment.
   return (
-    process.env.NODE_ENV === 'test' ||
-    process.env.DISABLE_RATE_LIMIT === 'true'
+    (env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test') &&
+    process.env.ALLOW_TEST_RATE_LIMIT_BYPASS === 'true'
   );
 };
 

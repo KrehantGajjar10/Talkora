@@ -1,10 +1,7 @@
 import 'dotenv/config';
-import { validateEnv } from './config/env.js';
+import { env } from './config/env.js';
 import app from './app.js';
 import { prisma } from './config/prisma.js';
-
-// Validate environment variables on startup
-const env = validateEnv();
 
 const PORT = env.PORT;
 

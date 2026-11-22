@@ -36,7 +36,15 @@ export const editPostTextSchema = z
     message: 'At least one field (title or content) must be provided for update',
   });
 
+export type FeedSortOption = 'newest' | 'top' | 'downvoted';
+
 export const feedQuerySchema = z.object({
+  sort: z
+    .enum(['newest', 'top', 'downvoted'], {
+      message: "Sort must be 'newest', 'top', or 'downvoted'",
+    })
+    .optional()
+    .default('newest'),
   page: z
     .string()
     .optional()

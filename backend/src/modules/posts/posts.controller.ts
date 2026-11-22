@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import * as postsService from './posts.service.js';
 import { PostsError } from './posts.service.js';
 import { sendSuccess, sendError } from '../../utils/api-response.js';
-import { removeImageSchema } from './posts.validation.js';
+import { removeImageSchema, FeedSortOption } from './posts.validation.js';
 
 function getParam(param: string | string[] | undefined): string | null {
   if (!param) return null;
@@ -38,13 +38,20 @@ export async function getPublicFeed(
 ): Promise<void> {
   try {
     const query = (res.locals.validatedQuery || req.query) as {
+      sort?: FeedSortOption;
       page?: number;
       limit?: number;
     };
+    const sort = (query.sort || 'newest') as FeedSortOption;
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 10;
 
-    const result = await postsService.getPublicFeed(page, limit, req.user?.id);
+    const result = await postsService.getPublicFeed(
+      page,
+      limit,
+      sort,
+      req.user?.id
+    );
     sendSuccess(res, 200, 'Feed retrieved successfully', result);
   } catch (error) {
     if (error instanceof PostsError) {

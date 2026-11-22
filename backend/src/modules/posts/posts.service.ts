@@ -1,8 +1,10 @@
 import { prisma } from '../../config/prisma.js';
+import { Prisma } from '../../generated/prisma/client.js';
 import { uploadImageStream, deleteImage } from '../../config/cloudinary.js';
 import type {
   CreatePostInput,
   EditPostTextInput,
+  FeedSortOption,
 } from './posts.validation.js';
 
 export class PostsError extends Error {
@@ -189,72 +191,95 @@ export async function createPost(
 export async function getPublicFeed(
   page: number,
   limit: number,
+  sort: FeedSortOption = 'newest',
   currentUserId?: string
 ): Promise<PaginatedPosts> {
   const skip = (page - 1) * limit;
   const take = limit;
 
-  const [posts, totalPosts] = await Promise.all([
-    prisma.post.findMany({
-      skip,
-      take,
-      orderBy: { createdAt: 'desc' },
-      select: postSelect,
-    }),
+  let orderByClause: Prisma.Sql;
+  switch (sort) {
+    case 'top':
+      orderByClause = Prisma.sql`score DESC, p.created_at DESC, p.id DESC`;
+      break;
+    case 'downvoted':
+      orderByClause = Prisma.sql`score ASC, p.created_at DESC, p.id DESC`;
+      break;
+    case 'newest':
+    default:
+      orderByClause = Prisma.sql`p.created_at DESC, p.id DESC`;
+      break;
+  }
+
+  const userVoteSql = currentUserId
+    ? Prisma.sql`(SELECT v2.type::text FROM votes v2 WHERE v2.post_id = p.id AND v2.user_id = ${currentUserId}) AS "userVote"`
+    : Prisma.sql`NULL::text AS "userVote"`;
+
+  const [rawPosts, totalPosts] = await Promise.all([
+    prisma.$queryRaw<
+      Array<{
+        id: string;
+        title: string;
+        content: string | null;
+        imageUrl: string | null;
+        createdAt: Date;
+        updatedAt: Date;
+        authorId: string;
+        authorUsername: string;
+        authorDisplayName: string;
+        authorAvatarUrl: string | null;
+        commentCount: number;
+        upvotes: number;
+        downvotes: number;
+        score: number;
+        userVote: string | null;
+      }>
+    >`
+      SELECT
+        p.id,
+        p.title,
+        p.content,
+        p.image_url AS "imageUrl",
+        p.created_at AS "createdAt",
+        p.updated_at AS "updatedAt",
+        u.id AS "authorId",
+        u.username AS "authorUsername",
+        u.display_name AS "authorDisplayName",
+        u.avatar_url AS "authorAvatarUrl",
+        (SELECT COUNT(*)::int FROM comments c WHERE c.post_id = p.id) AS "commentCount",
+        COUNT(v.id) FILTER (WHERE v.type = 'UPVOTE')::int AS "upvotes",
+        COUNT(v.id) FILTER (WHERE v.type = 'DOWNVOTE')::int AS "downvotes",
+        (COUNT(v.id) FILTER (WHERE v.type = 'UPVOTE') - COUNT(v.id) FILTER (WHERE v.type = 'DOWNVOTE'))::int AS "score",
+        ${userVoteSql}
+      FROM posts p
+      JOIN users u ON p.author_id = u.id
+      LEFT JOIN votes v ON p.id = v.post_id
+      GROUP BY p.id, u.id
+      ORDER BY ${orderByClause}
+      LIMIT ${take} OFFSET ${skip}
+    `,
     prisma.post.count(),
   ]);
 
-  const postIds = posts.map((p) => p.id);
-
-  // Batch query: Aggregate vote counts for all posts in page in a single query
-  const voteCounts =
-    postIds.length > 0
-      ? await prisma.vote.groupBy({
-          by: ['postId', 'type'],
-          where: { postId: { in: postIds } },
-          _count: { _all: true },
-        })
-      : [];
-
-  const voteStatsMap = new Map<string, { upvotes: number; downvotes: number }>();
-  for (const id of postIds) {
-    voteStatsMap.set(id, { upvotes: 0, downvotes: 0 });
-  }
-  for (const vc of voteCounts) {
-    const stats = voteStatsMap.get(vc.postId);
-    if (stats) {
-      if (vc.type === 'UPVOTE') stats.upvotes = vc._count._all;
-      if (vc.type === 'DOWNVOTE') stats.downvotes = vc._count._all;
-    }
-  }
-
-  // Batch query: User votes for posts in page in a single query if authenticated
-  const userVoteMap = new Map<string, 'UPVOTE' | 'DOWNVOTE'>();
-  if (currentUserId && postIds.length > 0) {
-    const userVotes = await prisma.vote.findMany({
-      where: {
-        userId: currentUserId,
-        postId: { in: postIds },
-      },
-      select: { postId: true, type: true },
-    });
-    for (const uv of userVotes) {
-      userVoteMap.set(uv.postId, uv.type);
-    }
-  }
-
-  const formattedPosts: SafePost[] = posts.map((post) => {
-    const stats = voteStatsMap.get(post.id) || { upvotes: 0, downvotes: 0 };
-    const score = stats.upvotes - stats.downvotes;
-    const userVote = userVoteMap.get(post.id) ?? null;
-
-    return formatSafePost(post, {
-      upvotes: stats.upvotes,
-      downvotes: stats.downvotes,
-      score,
-      userVote,
-    });
-  });
+  const formattedPosts: SafePost[] = rawPosts.map((row) => ({
+    id: row.id,
+    title: row.title,
+    content: row.content,
+    imageUrl: row.imageUrl,
+    author: {
+      id: row.authorId,
+      username: row.authorUsername,
+      displayName: row.authorDisplayName,
+      avatarUrl: row.authorAvatarUrl,
+    },
+    commentCount: Number(row.commentCount),
+    upvotes: Number(row.upvotes),
+    downvotes: Number(row.downvotes),
+    score: Number(row.score),
+    userVote: (row.userVote as 'UPVOTE' | 'DOWNVOTE') || null,
+    createdAt: new Date(row.createdAt),
+    updatedAt: new Date(row.updatedAt),
+  }));
 
   const totalPages = Math.ceil(totalPosts / limit) || 1;
   const hasNextPage = page < totalPages;

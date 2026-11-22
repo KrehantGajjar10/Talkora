@@ -60,6 +60,9 @@ const multerUpload = multer({
   limits: {
     fileSize: 5 * 1024 * 1024, // 5 MB
     files: 1,
+    fields: 10,
+    parts: 20,
+    fieldSize: 64 * 1024, // 64 KB
   },
   fileFilter: (_req, file, cb) => {
     const allowedMimes = ['image/jpeg', 'image/png', 'image/webp'];
@@ -80,6 +83,22 @@ export function uploadSingleImage(
       if (err instanceof multer.MulterError) {
         if (err.code === 'LIMIT_FILE_SIZE') {
           sendError(res, 413, 'Image too large. Maximum size allowed is 5 MB', []);
+          return;
+        }
+        if (err.code === 'LIMIT_FIELD_VALUE') {
+          sendError(res, 413, 'Form field value exceeds maximum permitted size of 64 KB', []);
+          return;
+        }
+        if (err.code === 'LIMIT_PART_COUNT') {
+          sendError(res, 400, 'Too many multipart parts in request', []);
+          return;
+        }
+        if (err.code === 'LIMIT_FIELD_COUNT') {
+          sendError(res, 400, 'Too many form fields in request', []);
+          return;
+        }
+        if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+          sendError(res, 400, `Unexpected form field: ${err.field}`, []);
           return;
         }
         sendError(res, 400, err.message, []);

@@ -49,9 +49,10 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled Promise Rejection:', reason);
+  gracefulShutdown('unhandledRejection');
 });
 
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
-  process.exit(1);
+  gracefulShutdown('uncaughtException');
 });

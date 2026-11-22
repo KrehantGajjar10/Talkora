@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import http from 'node:http';
 import crypto from 'node:crypto';
+import { validateRegressionDbSafety } from '../utils/regression-db-safety.js';
 
 const PORT = 5066;
 const BASE_URL = `http://localhost:${PORT}/api`;
@@ -92,77 +93,30 @@ async function runRegressionSuite() {
   console.log(`=======================================================\n`);
 
   // =========================================================================
-  // STRICT DATABASE SAFETY GATE & ISOLATED TEST ENVIRONMENT CONFIGURATION
+  // STRICT SHARED DATABASE SAFETY GATE & ISOLATED TEST CONFIGURATION
   // =========================================================================
 
-  // 1. Explicit execution approval gate
-  if (process.env.ALLOW_TEST_EXECUTION !== 'true') {
-    console.error(
-      '❌ Safety Gate Abort: Regression tests require explicit ALLOW_TEST_EXECUTION=true to run.'
-    );
-    process.exit(1);
+  const safetyCheck = validateRegressionDbSafety({
+    ALLOW_TEST_EXECUTION: process.env.ALLOW_TEST_EXECUTION,
+    TEST_DATABASE_URL: process.env.TEST_DATABASE_URL,
+    DATABASE_URL: process.env.DATABASE_URL,
+    EXPECTED_TEST_DB_HOST: process.env.EXPECTED_TEST_DB_HOST,
+    EXPECTED_TEST_DB_NAME: process.env.EXPECTED_TEST_DB_NAME,
+    PROTECTED_DATABASE_HOSTS: process.env.PROTECTED_DATABASE_HOSTS,
+  });
+
+  if (!safetyCheck.isValid) {
+    console.error(`❌ Safety Gate Abort: ${safetyCheck.reason}`);
+    process.exitCode = 1;
+    return;
   }
 
-  // 2. Strict dedicated TEST_DATABASE_URL requirement (never fall back to application DATABASE_URL)
-  const testDbUrl = process.env.TEST_DATABASE_URL?.trim();
-  if (!testDbUrl) {
-    console.error(
-      '❌ Safety Gate Abort: TEST_DATABASE_URL is required. The regression test runner will NEVER fall back to DATABASE_URL.'
-    );
-    process.exit(1);
-  }
-
-  const appDbUrl = process.env.DATABASE_URL?.trim();
-  if (appDbUrl && testDbUrl === appDbUrl && process.env.ALLOW_SHARED_TEST_DB !== 'true') {
-    console.error(
-      '❌ Safety Gate Abort: TEST_DATABASE_URL is identical to application DATABASE_URL. A dedicated test database or isolated branch is strictly required to protect application/production data.'
-    );
-    process.exit(1);
-  }
-
-  // 3. Parse and verify database connection endpoint identity
-  let parsedHost: string;
-  let parsedDbName: string;
-  try {
-    const parsed = new URL(testDbUrl);
-    parsedHost = parsed.hostname.toLowerCase();
-    parsedDbName = parsed.pathname.replace(/^\//, '').toLowerCase();
-  } catch {
-    console.error('❌ Safety Gate Abort: TEST_DATABASE_URL is not a valid connection URL format.');
-    process.exit(1);
-  }
-
-  // 4. Expected test host/endpoint identity verification (e.g. Neon branch endpoint ID)
-  const expectedHost = process.env.EXPECTED_TEST_DB_HOST?.trim().toLowerCase();
-  if (!expectedHost) {
-    console.error(
-      '❌ Safety Gate Abort: EXPECTED_TEST_DB_HOST must be explicitly configured to verify the target test database/branch identity before execution.'
-    );
-    process.exit(1);
-  }
-
-  if (!parsedHost.includes(expectedHost)) {
-    console.error(
-      `❌ Safety Gate Abort: TEST_DATABASE_URL host "${parsedHost}" does not match configured EXPECTED_TEST_DB_HOST "${expectedHost}".`
-    );
-    process.exit(1);
-  }
-
-  // 5. Expected test database name verification (if provided)
-  const expectedDbName = process.env.EXPECTED_TEST_DB_NAME?.trim().toLowerCase();
-  if (expectedDbName && parsedDbName !== expectedDbName) {
-    console.error(
-      `❌ Safety Gate Abort: TEST_DATABASE_URL database name "${parsedDbName}" does not match configured EXPECTED_TEST_DB_NAME "${expectedDbName}".`
-    );
-    process.exit(1);
-  }
-
-  // Route runtime application to the dedicated test database in an isolated test environment
-  process.env.DATABASE_URL = testDbUrl;
+  // Route runtime application to the verified dedicated test database
+  process.env.DATABASE_URL = process.env.TEST_DATABASE_URL!.trim();
   process.env.NODE_ENV = 'test';
   process.env.ALLOW_TEST_RATE_LIMIT_BYPASS = 'true';
 
-  // Dynamic imports: evaluate application & prisma with the verified test database connection
+  // Dynamic imports: evaluate application & prisma only AFTER database safety is verified
   const { default: app } = await import('../app.js');
   const { prisma } = await import('../config/prisma.js');
   const { ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME } = await import('../config/auth.js');
@@ -178,21 +132,23 @@ async function runRegressionSuite() {
     >`SELECT current_database()::text as current_db, inet_server_addr()::text as server_ip, version()::text as server_version`;
 
     const liveDbName = idResult?.current_db?.toLowerCase() || '';
-    if (expectedDbName && liveDbName !== expectedDbName) {
+    if (safetyCheck.identity?.expectedDbName && liveDbName !== safetyCheck.identity.expectedDbName) {
       console.error(
-        `❌ Safety Gate Abort: Active connected database "${liveDbName}" does not match expected "${expectedDbName}".`
+        `❌ Safety Gate Abort: Active connected database "${liveDbName}" does not match expected "${safetyCheck.identity.expectedDbName}".`
       );
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
 
-    console.log(`[Safety Gate Passed] Verified test database endpoint: ${parsedHost}`);
+    console.log(`[Safety Gate Passed] Verified test database endpoint: ${safetyCheck.identity?.host}`);
     console.log(`[Safety Gate Passed] Connected database name: ${idResult?.current_db}`);
     if (idResult?.server_ip) {
       console.log(`[Safety Gate Passed] Database server IP: ${idResult.server_ip}`);
     }
   } catch (dbErr) {
     console.error('❌ Safety Gate Abort: Failed to verify database identity:', dbErr);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   server = app.listen(PORT);
@@ -262,13 +218,19 @@ async function runRegressionSuite() {
     // ==========================================
     // 2. ORIGIN & CSRF PROTECTION
     // ==========================================
+    const frontendOriginList = (process.env.FRONTEND_URL || 'http://localhost:3000')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const testFrontendOrigin = frontendOriginList[0] || 'http://localhost:3000';
+
     const tOriginAllowed = await request('POST', '/auth/login', {
-      headers: { Origin: 'http://localhost:3000' },
+      headers: { Origin: testFrontendOrigin },
       body: { identifier: 'nobody', password: 'wrong' },
     });
     assert(
       tOriginAllowed.status !== 403,
-      '5. Valid frontend origin (http://localhost:3000) allowed past origin gate'
+      `5. Valid frontend origin (${testFrontendOrigin}) allowed past origin gate`
     );
 
     const tOriginRejected = await request('POST', '/auth/login', {

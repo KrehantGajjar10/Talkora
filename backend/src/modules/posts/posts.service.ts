@@ -357,14 +357,24 @@ export async function editPostText(
   if (input.title !== undefined) updateData.title = input.title;
   if (input.content !== undefined) updateData.content = input.content;
 
-  const [updated, voteStats] = await Promise.all([
-    prisma.post.update({
-      where: { id: postId },
-      data: updateData,
-      select: postSelect,
-    }),
-    getPostVoteStats(postId, userId),
-  ]);
+  const updated = await prisma.post.update({
+    where: { id: postId },
+    data: updateData,
+    select: postSelect,
+  });
+
+  let voteStats: PostVoteStats = {
+    upvotes: 0,
+    downvotes: 0,
+    score: 0,
+    userVote: null,
+  };
+
+  try {
+    voteStats = await getPostVoteStats(postId, userId);
+  } catch (statsErr) {
+    console.error(`Failed to fetch vote stats for edited post ${postId}:`, statsErr);
+  }
 
   return formatSafePost(updated, voteStats);
 }
@@ -393,28 +403,41 @@ export async function replacePostImage(
 
   const newImage = await uploadImageStream(file.buffer);
 
+  let updated;
   try {
-    const [updated, voteStats] = await Promise.all([
-      prisma.post.update({
-        where: { id: postId },
-        data: {
-          imageUrl: newImage.secureUrl,
-          imagePublicId: newImage.publicId,
-        },
-        select: postSelect,
-      }),
-      getPostVoteStats(postId, userId),
-    ]);
-
-    if (existing.imagePublicId) {
-      void deleteImage(existing.imagePublicId);
-    }
-
-    return formatSafePost(updated, voteStats);
-  } catch (error) {
+    updated = await prisma.post.update({
+      where: { id: postId },
+      data: {
+        imageUrl: newImage.secureUrl,
+        imagePublicId: newImage.publicId,
+      },
+      select: postSelect,
+    });
+  } catch (dbError) {
+    // DB update failed, delete the newly uploaded image so it doesn't become orphaned
     void deleteImage(newImage.publicId);
-    throw error;
+    throw dbError;
   }
+
+  // DB update succeeded! Delete the previous image from Cloudinary (best-effort)
+  if (existing.imagePublicId) {
+    void deleteImage(existing.imagePublicId);
+  }
+
+  let voteStats: PostVoteStats = {
+    upvotes: 0,
+    downvotes: 0,
+    score: 0,
+    userVote: null,
+  };
+
+  try {
+    voteStats = await getPostVoteStats(postId, userId);
+  } catch (statsErr) {
+    console.error(`Failed to fetch vote stats for post ${postId}:`, statsErr);
+  }
+
+  return formatSafePost(updated, voteStats);
 }
 
 export async function removePostImage(
@@ -446,20 +469,31 @@ export async function removePostImage(
     );
   }
 
-  const [updated, voteStats] = await Promise.all([
-    prisma.post.update({
-      where: { id: postId },
-      data: {
-        imageUrl: null,
-        imagePublicId: null,
-      },
-      select: postSelect,
-    }),
-    getPostVoteStats(postId, userId),
-  ]);
+  const updated = await prisma.post.update({
+    where: { id: postId },
+    data: {
+      imageUrl: null,
+      imagePublicId: null,
+    },
+    select: postSelect,
+  });
 
+  // DB update succeeded! Delete the previous image from Cloudinary (best-effort)
   if (existing.imagePublicId) {
     void deleteImage(existing.imagePublicId);
+  }
+
+  let voteStats: PostVoteStats = {
+    upvotes: 0,
+    downvotes: 0,
+    score: 0,
+    userVote: null,
+  };
+
+  try {
+    voteStats = await getPostVoteStats(postId, userId);
+  } catch (statsErr) {
+    console.error(`Failed to fetch vote stats for post ${postId}:`, statsErr);
   }
 
   return formatSafePost(updated, voteStats);

@@ -11,6 +11,11 @@ export function errorHandler(
   res: Response,
   _next: NextFunction
 ): void {
+  // If response headers have already been sent, delegate to Express default handler
+  if (res.headersSent) {
+    return _next(err);
+  }
+
   // 1. Handled Operational Application Errors (AppError, AuthError, PostsError, etc.)
   if (err instanceof AppError) {
     sendError(res, err.statusCode, err.message, err.errors);
@@ -47,6 +52,18 @@ export function errorHandler(
       sendError(res, 413, 'Image too large. Maximum size allowed is 5 MB', []);
       return;
     }
+    if (err.code === 'LIMIT_FIELD_VALUE') {
+      sendError(res, 413, 'Form field value exceeds maximum permitted size of 64 KB', []);
+      return;
+    }
+    if (err.code === 'LIMIT_PART_COUNT') {
+      sendError(res, 400, 'Too many multipart parts in request', []);
+      return;
+    }
+    if (err.code === 'LIMIT_FIELD_COUNT') {
+      sendError(res, 400, 'Too many form fields in request', []);
+      return;
+    }
     if (err.code === 'LIMIT_UNEXPECTED_FILE') {
       sendError(res, 400, `Unexpected form field: ${err.field}`, []);
       return;
@@ -55,9 +72,20 @@ export function errorHandler(
     return;
   }
 
-  // 4. SyntaxError from body-parser (malformed JSON)
+  // 4. Body-Parser Errors (malformed JSON or payload too large)
   if (err instanceof SyntaxError && 'status' in err && (err as { status: unknown }).status === 400) {
     sendError(res, 400, 'Malformed JSON in request body', []);
+    return;
+  }
+
+  if (
+    err !== null &&
+    typeof err === 'object' &&
+    (('type' in err && (err as { type: unknown }).type === 'entity.too.large') ||
+      ('status' in err && (err as { status: unknown }).status === 413) ||
+      ('statusCode' in err && (err as { statusCode: unknown }).statusCode === 413))
+  ) {
+    sendError(res, 413, 'Payload too large', []);
     return;
   }
 
@@ -76,6 +104,12 @@ export function errorHandler(
         // Foreign key constraint failed
         sendError(res, 400, 'Related resource not found', []);
         return;
+      case 'P1001': // Can't reach database server
+      case 'P1002': // Database server was reached but timed out
+      case 'P1017': // Server has closed the connection
+      case 'P2024': // Timed out fetching a new connection from the connection pool
+        sendError(res, 503, 'Database service is temporarily unavailable. Please try again later.', []);
+        return;
       default:
         console.error(`Prisma known request error [${err.code}]:`, err.message);
         sendError(res, 500, 'Database operation failed', []);
@@ -85,7 +119,7 @@ export function errorHandler(
 
   if (err instanceof Prisma.PrismaClientInitializationError) {
     console.error('Prisma initialization error:', err.message);
-    sendError(res, 503, 'Database service currently unavailable', []);
+    sendError(res, 503, 'Database service is temporarily unavailable', []);
     return;
   }
 

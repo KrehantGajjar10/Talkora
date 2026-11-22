@@ -1,11 +1,26 @@
 import { v2 as cloudinary } from 'cloudinary';
+import { env } from './env.js';
+import { ServiceUnavailableError } from '../utils/errors.js';
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-  secure: true,
-});
+export function isCloudinaryConfigured(): boolean {
+  return Boolean(
+    env.CLOUDINARY_CLOUD_NAME &&
+      env.CLOUDINARY_API_KEY &&
+      env.CLOUDINARY_API_SECRET &&
+      env.CLOUDINARY_CLOUD_NAME.trim() !== '' &&
+      env.CLOUDINARY_API_KEY.trim() !== '' &&
+      env.CLOUDINARY_API_SECRET.trim() !== ''
+  );
+}
+
+if (isCloudinaryConfigured()) {
+  cloudinary.config({
+    cloud_name: env.CLOUDINARY_CLOUD_NAME,
+    api_key: env.CLOUDINARY_API_KEY,
+    api_secret: env.CLOUDINARY_API_SECRET,
+    secure: true,
+  });
+}
 
 export interface CloudinaryUploadResult {
   secureUrl: string;
@@ -16,6 +31,12 @@ export function uploadImageStream(
   buffer: Buffer,
   folder: string = 'talkora/posts'
 ): Promise<CloudinaryUploadResult> {
+  if (!isCloudinaryConfigured()) {
+    throw new ServiceUnavailableError(
+      'Image upload service is currently unavailable. Cloudinary storage is not configured.'
+    );
+  }
+
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
       {
@@ -38,6 +59,11 @@ export function uploadImageStream(
 }
 
 export async function deleteImage(publicId: string): Promise<void> {
+  if (!isCloudinaryConfigured()) {
+    console.warn(`[Cloudinary] Cannot delete image "${publicId}": Cloudinary is not configured.`);
+    return;
+  }
+
   try {
     await cloudinary.uploader.destroy(publicId, {
       resource_type: 'image',

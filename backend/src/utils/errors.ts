@@ -70,3 +70,9 @@ export class InternalServerError extends AppError {
     super(500, message, errors);
   }
 }
+
+export class ServiceUnavailableError extends AppError {
+  constructor(message: string = 'Service temporarily unavailable', errors: FieldError[] = []) {
+    super(503, message, errors);
+  }
+}

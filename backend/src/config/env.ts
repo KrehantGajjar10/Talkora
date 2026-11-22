@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isIP } from 'node:net';
 
 const isValidTrustProxyValue = (val: unknown): boolean => {
   if (typeof val === 'boolean') return true;
@@ -13,8 +14,26 @@ const isValidTrustProxyValue = (val: unknown): boolean => {
     }
     // Check comma-separated IPs or CIDRs
     const parts = trimmed.split(',').map((p) => p.trim());
-    const ipOrCidrRegex = /^([0-9a-fA-F:.]+|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(\/\d{1,3})?$/;
-    return parts.length > 0 && parts.every((p) => ipOrCidrRegex.test(p) || ['loopback', 'linklocal', 'uniquelocal'].includes(p.toLowerCase()));
+    if (parts.length === 0) return false;
+    for (const part of parts) {
+      if (['loopback', 'linklocal', 'uniquelocal'].includes(part.toLowerCase())) {
+        continue;
+      }
+      if (part.includes('/')) {
+        const [ip, prefixStr] = part.split('/');
+        if (!ip || !prefixStr || !/^\d+$/.test(prefixStr)) {
+          return false;
+        }
+        const prefix = Number(prefixStr);
+        const ipType = isIP(ip);
+        if (ipType === 4 && (prefix < 0 || prefix > 32)) return false;
+        if (ipType === 6 && (prefix < 0 || prefix > 128)) return false;
+        if (ipType === 0) return false;
+      } else {
+        if (isIP(part) === 0) return false;
+      }
+    }
+    return true;
   }
   return false;
 };
@@ -27,7 +46,7 @@ const trustProxySchema = z
     if (!isValidTrustProxyValue(val)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `Invalid TRUST_PROXY value: "${val}". Must be a boolean ('true'/'false'), non-negative integer hop count, or standard proxy subnet/IP list ('loopback', 'linklocal', 'uniquelocal', CIDR).`,
+        message: `Invalid TRUST_PROXY value: "${val}". Must be a boolean ('true'/'false'), non-negative integer hop count, or valid proxy subnet/IP/CIDR list.`,
       });
     }
   })
@@ -64,21 +83,44 @@ export const envSchema = z
     CLOUDINARY_API_KEY: z.string().optional(),
     CLOUDINARY_API_SECRET: z.string().optional(),
     TRUST_PROXY: trustProxySchema,
+
+    // Platform deployment indicator variables for deterministic environment detection
+    RENDER: z.string().optional(),
+    RAILWAY_ENVIRONMENT: z.string().optional(),
+    FLY_APP_NAME: z.string().optional(),
+    AWS_EXECUTION_ENV: z.string().optional(),
+    VERCEL: z.string().optional(),
   })
   .superRefine((data, ctx) => {
     // 1. Detect deployed environments where NODE_ENV is missing
     const hasDeploymentIndicator = Boolean(
-      process.env.RENDER ||
-      process.env.RAILWAY_ENVIRONMENT ||
-      process.env.FLY_APP_NAME ||
-      process.env.AWS_EXECUTION_ENV ||
-      process.env.VERCEL
+      data.RENDER ||
+      data.RAILWAY_ENVIRONMENT ||
+      data.FLY_APP_NAME ||
+      data.AWS_EXECUTION_ENV ||
+      data.VERCEL
     );
 
-    const isNonLocalFrontend =
-      data.FRONTEND_URL &&
-      !data.FRONTEND_URL.includes('localhost') &&
-      !data.FRONTEND_URL.includes('127.0.0.1');
+    const origins = data.FRONTEND_URL.split(',')
+      .map((u) => u.trim())
+      .filter(Boolean);
+
+    const isNonLocalFrontend = origins.some((origin) => {
+      try {
+        const parsed = new URL(origin);
+        const host = parsed.hostname.toLowerCase();
+        return (
+          host !== 'localhost' &&
+          host !== '127.0.0.1' &&
+          host !== '0.0.0.0' &&
+          host !== '::1' &&
+          !host.endsWith('.localhost') &&
+          !host.endsWith('.local')
+        );
+      } catch {
+        return false;
+      }
+    });
 
     if (!data.NODE_ENV) {
       if (hasDeploymentIndicator || isNonLocalFrontend) {
@@ -95,10 +137,6 @@ export const envSchema = z
     const resolvedEnv = data.NODE_ENV || 'development';
 
     // 2. Validate FRONTEND_URL origins
-    const origins = data.FRONTEND_URL.split(',')
-      .map((u) => u.trim())
-      .filter(Boolean);
-
     if (origins.length === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -128,6 +166,39 @@ export const envSchema = z
         });
       }
 
+      // Origin purity checks: origins cannot have userinfo, subpaths, queries, or hashes
+      if (parsedUrl.username || parsedUrl.password) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `FRONTEND_URL origin cannot contain credentials/userinfo: "${origin}".`,
+          path: ['FRONTEND_URL'],
+        });
+      }
+
+      if (parsedUrl.pathname !== '' && parsedUrl.pathname !== '/') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `FRONTEND_URL must be a pure origin without path: "${origin}".`,
+          path: ['FRONTEND_URL'],
+        });
+      }
+
+      if (parsedUrl.search) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `FRONTEND_URL origin cannot contain query parameters: "${origin}".`,
+          path: ['FRONTEND_URL'],
+        });
+      }
+
+      if (parsedUrl.hash) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `FRONTEND_URL origin cannot contain a URL hash/fragment: "${origin}".`,
+          path: ['FRONTEND_URL'],
+        });
+      }
+
       // Production-specific FRONTEND_URL rules
       if (resolvedEnv === 'production') {
         if (parsedUrl.protocol !== 'https:') {
@@ -143,7 +214,9 @@ export const envSchema = z
           hostname === 'localhost' ||
           hostname === '127.0.0.1' ||
           hostname === '0.0.0.0' ||
-          hostname === '::1'
+          hostname === '::1' ||
+          hostname.endsWith('.localhost') ||
+          hostname.endsWith('.local')
         ) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
@@ -154,39 +227,84 @@ export const envSchema = z
       }
     }
 
-    // 3. Production Cloudinary & Cookie requirements
+    // 3. COOKIE_DOMAIN validation
+    if (data.COOKIE_DOMAIN && data.COOKIE_DOMAIN.trim() !== '') {
+      const cookieDomain = data.COOKIE_DOMAIN.trim().toLowerCase();
+      // Domain syntax validation: RFC 6265
+      // Optional leading dot, followed by labels separated by dots
+      const domainWithoutLeadingDot = cookieDomain.startsWith('.')
+        ? cookieDomain.slice(1)
+        : cookieDomain;
+
+      if (
+        cookieDomain.includes('://') ||
+        cookieDomain.includes(':') ||
+        cookieDomain.includes('/') ||
+        cookieDomain.includes(' ') ||
+        !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(domainWithoutLeadingDot)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Invalid COOKIE_DOMAIN format: "${data.COOKIE_DOMAIN}". Must be a valid domain without protocol, port, or path.`,
+          path: ['COOKIE_DOMAIN'],
+        });
+      }
+
+      if (resolvedEnv === 'production') {
+        if (
+          domainWithoutLeadingDot === 'localhost' ||
+          domainWithoutLeadingDot === '127.0.0.1' ||
+          domainWithoutLeadingDot.endsWith('.localhost') ||
+          domainWithoutLeadingDot.endsWith('.local') ||
+          isIP(domainWithoutLeadingDot) !== 0
+        ) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `COOKIE_DOMAIN cannot be localhost or an IP address in production: "${data.COOKIE_DOMAIN}".`,
+            path: ['COOKIE_DOMAIN'],
+          });
+        }
+      }
+    }
+
+    // 4. Cloudinary credentials validation
+    const hasCloudName = Boolean(data.CLOUDINARY_CLOUD_NAME && data.CLOUDINARY_CLOUD_NAME.trim() !== '');
+    const hasApiKey = Boolean(data.CLOUDINARY_API_KEY && data.CLOUDINARY_API_KEY.trim() !== '');
+    const hasApiSecret = Boolean(data.CLOUDINARY_API_SECRET && data.CLOUDINARY_API_SECRET.trim() !== '');
+
+    // Partial credentials check across all environments
+    if (hasCloudName || hasApiKey || hasApiSecret) {
+      if (!hasCloudName || !hasApiKey || !hasApiSecret) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Partial Cloudinary credentials provided. CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET must all be supplied together.',
+          path: ['CLOUDINARY_CLOUD_NAME'],
+        });
+      }
+    }
+
+    // Strict requirement in production
     if (resolvedEnv === 'production') {
-      if (!data.CLOUDINARY_CLOUD_NAME || data.CLOUDINARY_CLOUD_NAME.trim() === '') {
+      if (!hasCloudName) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: 'CLOUDINARY_CLOUD_NAME is required in production environment.',
           path: ['CLOUDINARY_CLOUD_NAME'],
         });
       }
-      if (!data.CLOUDINARY_API_KEY || data.CLOUDINARY_API_KEY.trim() === '') {
+      if (!hasApiKey) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: 'CLOUDINARY_API_KEY is required in production environment.',
           path: ['CLOUDINARY_API_KEY'],
         });
       }
-      if (!data.CLOUDINARY_API_SECRET || data.CLOUDINARY_API_SECRET.trim() === '') {
+      if (!hasApiSecret) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: 'CLOUDINARY_API_SECRET is required in production environment.',
           path: ['CLOUDINARY_API_SECRET'],
         });
-      }
-
-      if (data.COOKIE_DOMAIN) {
-        const domain = data.COOKIE_DOMAIN.toLowerCase().trim();
-        if (domain.includes('localhost') || domain.includes('127.0.0.1')) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: 'COOKIE_DOMAIN cannot be localhost in production environment.',
-            path: ['COOKIE_DOMAIN'],
-          });
-        }
       }
     }
   })

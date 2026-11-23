@@ -5,6 +5,8 @@ export interface SafeAuthor {
   avatarUrl: string | null;
 }
 
+export type VoteType = "UPVOTE" | "DOWNVOTE";
+
 export interface SafePost {
   id: string;
   title: string;
@@ -12,6 +14,10 @@ export interface SafePost {
   imageUrl: string | null;
   author: SafeAuthor;
   commentCount: number;
+  upvotes?: number;
+  downvotes?: number;
+  score: number;
+  userVote: VoteType | null;
   createdAt: string;
   updatedAt: string;
 }

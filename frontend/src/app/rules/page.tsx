@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, ShieldCheck, CheckCircle2, AlertOctagon, Users2, BookOpen } from "lucide-react";
+import { ArrowLeft, ShieldCheck, CheckCircle2, AlertOctagon, Users2 } from "lucide-react";
 import { Navbar } from "@/components/navbar";
 import { Footer } from "@/components/footer";
 

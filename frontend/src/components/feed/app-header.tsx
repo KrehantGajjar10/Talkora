@@ -10,10 +10,9 @@ import {
   User as UserIcon,
   Settings,
   ChevronDown,
-  Sparkles,
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {

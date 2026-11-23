@@ -4,7 +4,6 @@ import { use, useState, Suspense } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
-  User as UserIcon,
   Calendar,
   MessageSquare,
   Share2,
@@ -13,7 +12,6 @@ import {
   Check,
   AlertCircle,
   FileText,
-  Sparkles,
   Info,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -25,7 +23,7 @@ import { PostCard } from "@/components/feed/post-card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { buttonVariants } from "@/components/ui/button";
-import type { SafePost, PaginatedPostsResponse } from "@/types/post";
+import type { PaginatedPostsResponse } from "@/types/post";
 
 export interface PublicProfile {
   id: string;
@@ -57,7 +55,6 @@ function UserProfileContent({ params }: UserProfilePageProps) {
     data: profileData,
     isLoading: profileLoading,
     isError: profileError,
-    error,
   } = useQuery<{ profile: PublicProfile }>({
     queryKey: ["user-profile", username],
     queryFn: async () => {

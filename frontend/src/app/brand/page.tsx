@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, Palette, MessageSquare, Type, Download, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Palette, MessageSquare, Type } from "lucide-react";
 import { Navbar } from "@/components/navbar";
 import { Footer } from "@/components/footer";
 

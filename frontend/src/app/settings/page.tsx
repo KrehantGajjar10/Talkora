@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { toast } from "sonner";
@@ -15,12 +15,9 @@ import {
   Loader2,
   Check,
   Mail,
-  Calendar,
   LogOut,
   Save,
-  AlertCircle,
   Eye,
-  AtSign,
 } from "lucide-react";
 import api from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
@@ -66,8 +63,8 @@ export default function SettingsPage() {
     register,
     handleSubmit,
     reset,
-    watch,
-    formState: { errors, isDirty },
+    control,
+    formState: { errors },
   } = useForm<SettingsFormData>({
     resolver: zodResolver(settingsSchema),
     defaultValues: {
@@ -88,9 +85,9 @@ export default function SettingsPage() {
     }
   }, [user, reset]);
 
-  const watchedDisplayName = watch("displayName") || "";
-  const watchedUsername = watch("username") || "";
-  const watchedBio = watch("bio") || "";
+  const watchedDisplayName = useWatch({ control, name: "displayName" }) || "";
+  const watchedUsername = useWatch({ control, name: "username" }) || "";
+  const watchedBio = useWatch({ control, name: "bio" }) || "";
 
   const onSubmit = async (data: SettingsFormData) => {
     try {

@@ -48,8 +48,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    void checkAuth();
-  }, [checkAuth]);
+    let isMounted = true;
+
+    async function initAuth() {
+      try {
+        const response = await api.get("/auth/me");
+        if (!isMounted) return;
+        if (response.data?.success && response.data?.data?.user) {
+          setUser(response.data.data.user);
+        } else {
+          setUser(null);
+        }
+      } catch {
+        if (!isMounted) return;
+        setUser(null);
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void initAuth();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const logout = async () => {
     try {

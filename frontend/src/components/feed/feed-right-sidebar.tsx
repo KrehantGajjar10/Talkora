@@ -8,8 +8,6 @@ import {
   Users,
   Radio,
   Calendar,
-  CheckCircle2,
-  ExternalLink,
 } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 

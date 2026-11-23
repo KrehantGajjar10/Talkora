@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { MessageSquare, Globe, ExternalLink, ArrowRight } from "lucide-react";
+import { MessageSquare, Globe } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 
 export function Footer() {

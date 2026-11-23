@@ -3,7 +3,7 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { toast } from "sonner";
@@ -62,7 +62,7 @@ export default function SubmitPostPage() {
   const {
     register,
     handleSubmit,
-    watch,
+    control,
     formState: { errors },
   } = useForm<SubmitFormData>({
     resolver: zodResolver(submitSchema),
@@ -72,8 +72,8 @@ export default function SubmitPostPage() {
     },
   });
 
-  const titleValue = watch("title") || "";
-  const contentValue = watch("content") || "";
+  const titleValue = useWatch({ control, name: "title" }) || "";
+  const contentValue = useWatch({ control, name: "content" }) || "";
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -270,6 +270,7 @@ export default function SubmitPostPage() {
                   {imagePreview ? (
                     <div className="relative rounded-2xl overflow-hidden border border-border/80 bg-secondary/40 max-h-80 flex items-center justify-center p-2">
                       {/* Preview Image */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={imagePreview}
                         alt="Upload preview"

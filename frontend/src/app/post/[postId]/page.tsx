@@ -14,7 +14,6 @@ import {
   Check,
   AlertCircle,
   RefreshCw,
-  Send,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
@@ -23,10 +22,11 @@ import { cn, parsePostTitle } from "@/lib/utils";
 import { AppHeader } from "@/components/feed/app-header";
 import { FeedRightSidebar } from "@/components/feed/feed-right-sidebar";
 import { FeedSidebar } from "@/components/feed/feed-sidebar";
+import { CommentSection } from "@/components/comments/comment-section";
+import { usePostVote } from "@/hooks/use-post-vote";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { buttonVariants } from "@/components/ui/button";
 import type { SafePost } from "@/types/post";
 
 interface PostPageProps {
@@ -37,18 +37,10 @@ function SinglePostContent({ params }: PostPageProps) {
   const resolvedParams = use(params);
   const postId = resolvedParams.postId;
 
-  const [voteState, setVoteState] = useState<"up" | "down" | null>(null);
-  const baseScore = 0;
-  const score = Math.max(
-    0,
-    baseScore + (voteState === "up" ? 1 : voteState === "down" ? -1 : 0)
-  );
-  const isDownvoteDisabled = score <= 0 && voteState !== "down";
-
   const [isSaved, setIsSaved] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
-  const { data, isLoading, isError, error, refetch } = useQuery<{ post: SafePost }>({
+  const { data, isLoading, isError, error } = useQuery<{ post: SafePost }>({
     queryKey: ["post", postId],
     queryFn: async () => {
       const response = await api.get(`/posts/${postId}`);
@@ -58,16 +50,11 @@ function SinglePostContent({ params }: PostPageProps) {
 
   const post = data?.post;
 
-  const handleVote = (direction: "up" | "down") => {
-    if (direction === "down" && isDownvoteDisabled) {
-      return;
-    }
-    if (voteState === direction) {
-      setVoteState(null);
-    } else {
-      setVoteState(direction);
-    }
-  };
+  const { score, userVote, isDownvoteDisabled, handleVote } = usePostVote({
+    postId,
+    initialScore: post?.score ?? 0,
+    initialUserVote: post?.userVote ?? null,
+  });
 
   const handleShare = async () => {
     try {
@@ -167,23 +154,21 @@ function SinglePostContent({ params }: PostPageProps) {
                   <div className="hidden sm:flex flex-col items-center py-5 px-3 bg-secondary/30 border-r border-border/50 shrink-0 w-12">
                     <button
                       type="button"
-                      onClick={() => handleVote("up")}
+                      onClick={(e) => handleVote("UPVOTE", e)}
                       aria-label="Upvote"
                       className={cn(
-                        "p-1 rounded-md transition-colors hover:bg-orange-100",
-                        voteState === "up" ? "text-orange-600 bg-orange-100/80" : "text-muted-foreground"
+                        "p-1 rounded-md transition-colors hover:bg-orange-100 dark:hover:bg-orange-950/40",
+                        userVote === "UPVOTE" ? "text-orange-600 bg-orange-100/80" : "text-muted-foreground"
                       )}
                     >
-                      <ArrowBigUp className={cn("w-6 h-6", voteState === "up" && "fill-current")} />
+                      <ArrowBigUp className={cn("w-6 h-6", userVote === "UPVOTE" && "fill-current")} />
                     </button>
                     <span
                       className={cn(
                         "text-xs font-bold my-1 select-none tabular-nums",
-                        score === 0
-                          ? "text-foreground"
-                          : voteState === "up"
+                        userVote === "UPVOTE"
                           ? "text-orange-600"
-                          : voteState === "down"
+                          : userVote === "DOWNVOTE"
                           ? "text-blue-600"
                           : "text-foreground"
                       )}
@@ -193,18 +178,18 @@ function SinglePostContent({ params }: PostPageProps) {
                     <button
                       type="button"
                       disabled={isDownvoteDisabled}
-                      onClick={() => handleVote("down")}
+                      onClick={(e) => handleVote("DOWNVOTE", e)}
                       aria-label="Downvote"
                       className={cn(
                         "p-1 rounded-md transition-colors",
                         isDownvoteDisabled
                           ? "text-muted-foreground/30 cursor-not-allowed opacity-40 hover:bg-transparent"
-                          : voteState === "down"
-                          ? "text-blue-600 bg-blue-100/80 hover:bg-blue-100"
-                          : "text-muted-foreground hover:bg-blue-100"
+                          : userVote === "DOWNVOTE"
+                          ? "text-blue-600 bg-blue-100/80 hover:bg-blue-100 dark:hover:bg-blue-950/40"
+                          : "text-muted-foreground hover:bg-blue-100 dark:hover:bg-blue-950/40"
                       )}
                     >
-                      <ArrowBigDown className={cn("w-6 h-6", voteState === "down" && "fill-current")} />
+                      <ArrowBigDown className={cn("w-6 h-6", userVote === "DOWNVOTE" && "fill-current")} />
                     </button>
                   </div>
 
@@ -263,6 +248,49 @@ function SinglePostContent({ params }: PostPageProps) {
                     {/* Action Footer */}
                     <div className="mt-6 pt-4 border-t border-border/60 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
+                        {/* Mobile voting controls (hidden on sm+) */}
+                        <div className="flex sm:hidden items-center bg-secondary/60 rounded-full px-2 py-0.5 border border-border/60">
+                          <button
+                            type="button"
+                            onClick={(e) => handleVote("UPVOTE", e)}
+                            aria-label="Upvote"
+                            className={cn(
+                              "p-1 rounded-full transition-colors",
+                              userVote === "UPVOTE" ? "text-orange-600 font-bold" : "text-muted-foreground"
+                            )}
+                          >
+                            <ArrowBigUp className={cn("w-4 h-4", userVote === "UPVOTE" && "fill-current")} />
+                          </button>
+                          <span
+                            className={cn(
+                              "text-xs font-bold px-1 tabular-nums",
+                              userVote === "UPVOTE"
+                                ? "text-orange-600"
+                                : userVote === "DOWNVOTE"
+                                ? "text-blue-600"
+                                : "text-foreground"
+                            )}
+                          >
+                            {score}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={isDownvoteDisabled}
+                            onClick={(e) => handleVote("DOWNVOTE", e)}
+                            aria-label="Downvote"
+                            className={cn(
+                              "p-1 rounded-full transition-colors",
+                              isDownvoteDisabled
+                                ? "text-muted-foreground/30 cursor-not-allowed opacity-40 hover:bg-transparent"
+                                : userVote === "DOWNVOTE"
+                                ? "text-blue-600 font-bold"
+                                : "text-muted-foreground hover:text-blue-600"
+                            )}
+                          >
+                            <ArrowBigDown className={cn("w-4 h-4", userVote === "DOWNVOTE" && "fill-current")} />
+                          </button>
+                        </div>
+
                         <button
                           type="button"
                           onClick={handleShare}
@@ -304,28 +332,11 @@ function SinglePostContent({ params }: PostPageProps) {
                   </div>
                 </div>
 
-                {/* Comment Section Placeholder (Taste-Skill compliant design) */}
-                <div className="border-t border-border/80 bg-secondary/20 p-5 sm:p-6 space-y-4">
-                  <h3 className="font-serif font-bold text-sm uppercase tracking-wider text-foreground">
-                    Discussion Comments ({post.commentCount})
-                  </h3>
-
-                  <div className="space-y-2">
-                    <Textarea
-                      rows={3}
-                      placeholder="Join the discussion... (Comment threads will be unlocked in the upcoming update)"
-                      className="rounded-xl bg-card border-border/80 text-xs resize-none"
-                      disabled
-                    />
-                    <div className="flex justify-between items-center text-[11px] text-muted-foreground">
-                      <span>Comments are moderated under Talkora community charter</span>
-                      <Button size="sm" disabled className="h-8 rounded-xl text-xs gap-1.5">
-                        <Send className="w-3 h-3" />
-                        <span>Comment</span>
-                      </Button>
-                    </div>
-                  </div>
-                </div>
+                {/* Live Discussion & Comment System */}
+                <CommentSection
+                  postId={post.id}
+                  initialCommentCount={post.commentCount}
+                />
               </article>
             )}
           </div>

@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
+import { usePostVote } from "@/hooks/use-post-vote";
 import { cn, parsePostTitle } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -32,28 +33,15 @@ interface PostCardProps {
 }
 
 export function PostCard({ post, priority = false }: PostCardProps) {
-  const [voteState, setVoteState] = useState<"up" | "down" | null>(null);
-  const baseScore = 0;
-  const score = Math.max(
-    0,
-    baseScore + (voteState === "up" ? 1 : voteState === "down" ? -1 : 0)
-  );
-  const isDownvoteDisabled = score <= 0 && voteState !== "down";
+  const { score, userVote, isDownvoteDisabled, handleVote } = usePostVote({
+    postId: post.id,
+    initialScore: post.score ?? 0,
+    initialUserVote: post.userVote ?? null,
+  });
 
   const [isSaved, setIsSaved] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [isContentExpanded, setIsContentExpanded] = useState(false);
-
-  const handleVote = (direction: "up" | "down") => {
-    if (direction === "down" && isDownvoteDisabled) {
-      return;
-    }
-    if (voteState === direction) {
-      setVoteState(null);
-    } else {
-      setVoteState(direction);
-    }
-  };
 
   const handleShare = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -104,23 +92,21 @@ export function PostCard({ post, priority = false }: PostCardProps) {
       <div className="hidden sm:flex flex-col items-center py-4 px-3 bg-secondary/30 border-r border-border/50 shrink-0 w-12">
         <button
           type="button"
-          onClick={() => handleVote("up")}
+          onClick={(e) => handleVote("UPVOTE", e)}
           aria-label="Upvote"
           className={cn(
             "p-1 rounded-md transition-colors hover:bg-orange-100 dark:hover:bg-orange-950/40",
-            voteState === "up" ? "text-orange-600 bg-orange-100/80" : "text-muted-foreground"
+            userVote === "UPVOTE" ? "text-orange-600 bg-orange-100/80" : "text-muted-foreground"
           )}
         >
-          <ArrowBigUp className={cn("w-6 h-6", voteState === "up" && "fill-current")} />
+          <ArrowBigUp className={cn("w-6 h-6", userVote === "UPVOTE" && "fill-current")} />
         </button>
         <span
           className={cn(
             "text-xs font-bold my-1 select-none tabular-nums",
-            score === 0
-              ? "text-foreground"
-              : voteState === "up"
+            userVote === "UPVOTE"
               ? "text-orange-600"
-              : voteState === "down"
+              : userVote === "DOWNVOTE"
               ? "text-blue-600"
               : "text-foreground"
           )}
@@ -130,18 +116,18 @@ export function PostCard({ post, priority = false }: PostCardProps) {
         <button
           type="button"
           disabled={isDownvoteDisabled}
-          onClick={() => handleVote("down")}
+          onClick={(e) => handleVote("DOWNVOTE", e)}
           aria-label="Downvote"
           className={cn(
             "p-1 rounded-md transition-colors",
             isDownvoteDisabled
               ? "text-muted-foreground/30 cursor-not-allowed opacity-40 hover:bg-transparent"
-              : voteState === "down"
+              : userVote === "DOWNVOTE"
               ? "text-blue-600 bg-blue-100/80 hover:bg-blue-100 dark:hover:bg-blue-950/40"
               : "text-muted-foreground hover:bg-blue-100 dark:hover:bg-blue-950/40"
           )}
         >
-          <ArrowBigDown className={cn("w-6 h-6", voteState === "down" && "fill-current")} />
+          <ArrowBigDown className={cn("w-6 h-6", userVote === "DOWNVOTE" && "fill-current")} />
         </button>
       </div>
 
@@ -250,23 +236,21 @@ export function PostCard({ post, priority = false }: PostCardProps) {
           <div className="flex sm:hidden items-center bg-secondary/60 rounded-full px-2 py-0.5 border border-border/60">
             <button
               type="button"
-              onClick={() => handleVote("up")}
+              onClick={(e) => handleVote("UPVOTE", e)}
               aria-label="Upvote"
               className={cn(
-                "p-1 rounded-full",
-                voteState === "up" ? "text-orange-600 font-bold" : "text-muted-foreground"
+                "p-1 rounded-full transition-colors",
+                userVote === "UPVOTE" ? "text-orange-600 font-bold" : "text-muted-foreground"
               )}
             >
-              <ArrowBigUp className={cn("w-4 h-4", voteState === "up" && "fill-current")} />
+              <ArrowBigUp className={cn("w-4 h-4", userVote === "UPVOTE" && "fill-current")} />
             </button>
             <span
               className={cn(
                 "text-xs font-bold px-1 tabular-nums",
-                score === 0
-                  ? "text-foreground"
-                  : voteState === "up"
+                userVote === "UPVOTE"
                   ? "text-orange-600"
-                  : voteState === "down"
+                  : userVote === "DOWNVOTE"
                   ? "text-blue-600"
                   : "text-foreground"
               )}
@@ -276,18 +260,18 @@ export function PostCard({ post, priority = false }: PostCardProps) {
             <button
               type="button"
               disabled={isDownvoteDisabled}
-              onClick={() => handleVote("down")}
+              onClick={(e) => handleVote("DOWNVOTE", e)}
               aria-label="Downvote"
               className={cn(
-                "p-1 rounded-full",
+                "p-1 rounded-full transition-colors",
                 isDownvoteDisabled
                   ? "text-muted-foreground/30 cursor-not-allowed opacity-40 hover:bg-transparent"
-                  : voteState === "down"
+                  : userVote === "DOWNVOTE"
                   ? "text-blue-600 font-bold"
                   : "text-muted-foreground hover:text-blue-600"
               )}
             >
-              <ArrowBigDown className={cn("w-4 h-4", voteState === "down" && "fill-current")} />
+              <ArrowBigDown className={cn("w-4 h-4", userVote === "DOWNVOTE" && "fill-current")} />
             </button>
           </div>
 

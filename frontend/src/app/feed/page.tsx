@@ -201,7 +201,7 @@ export default function FeedPage() {
             {searchQuery.trim() && (
               <div className="flex items-center justify-between bg-primary/5 border border-primary/20 px-4 py-2.5 rounded-xl text-xs text-foreground">
                 <span>
-                  Showing results matching <span className="font-bold">"{searchQuery}"</span>
+                  Showing results matching <span className="font-bold">&ldquo;{searchQuery}&rdquo;</span>
                 </span>
                 <button
                   type="button"
